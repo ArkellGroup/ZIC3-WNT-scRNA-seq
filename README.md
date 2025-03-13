@@ -35,8 +35,6 @@ Extended data:
 
 ## Code notes
 
-Prior to running this code in R, the scRNA-seq object 
-
 Throughout these markdowns, 'WT' refers to all 4 *Zic3^+/+* embryos together and Mut refers to all four *Zic3^Ka/Y* embryos together.
 
 Merged data refers to all 8 embryos (WT and Mut) together. 
