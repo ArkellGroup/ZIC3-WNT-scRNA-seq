@@ -1,0 +1,7 @@
+cp genome.fa mm10_genome_GFP.fa
+gunzip -c genes.gtf.gz > mm10_genes.GFP.gtf 
+
+cat ./GFP.fa >> mm10_genome_GFP.fa 
+cat ./GFP.gtf >> mm10_genes.GFP.gtf 
+
+cellranger mkref --genome=mm10_eGFP_ref_Di --fasta=./mm10_genome_GFP.fa --genes=./mm10_genes.GFP.gtf 

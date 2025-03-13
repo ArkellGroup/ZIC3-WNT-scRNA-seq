@@ -1,0 +1,11 @@
+Adapted from 10x default mouse genome version (mm10). 
+  
+  download link:
+    wget "https://cf.10xgenomics.com/supp/cell-vdj/refdata-cellranger-vdj-GRCm38-alts-ensembl-7.0.0.tar.gz"
+
+From the download files, 'genome.fa' and 'genes.gtf.gz' are used in the following Custom Reference building.
+
+And then, add a special Marker gene, GFP, according to the 10x tutorial to the 'genome.fa' and 'genes.gtf.gz' files. 
+  The newly added genes will exist as an independent 'chromosome' in the genome. 
+  Its existence will not affect the corresponding read mapping of genes other than GFP. 
+  Therefore, even if GFP is no longer used in subsequent experiments, there is no need to remove this gene from the reference.
