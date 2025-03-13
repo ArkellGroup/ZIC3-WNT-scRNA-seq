@@ -1,0 +1,735 @@
+---
+title: "Zic3Ka/Y scRNA-seq analysis: DEGs"
+author: "Kristen"
+date: "`r Sys.Date()`"
+output: html_document
+---
+# 1. Start
+
+**NOTE: This markdown follows on from 2_1_UMAPs. you will need to load the RDS Seurat object and run the first steps up to completing UMAP generation (2_1_UMAPs) before you can do any analysis using the other markdowns.**
+
+## Figures and Data used in paper
+
+*Supp Figure 5D:* heatmap of WT cluster identification
+*Figure 4D:* Apoptosis and Proliferation DEGs
+*Figure 5A:* Lineage Marker Expression
+*Supp Figure 6B:* Cell morphology, adhesion and polarity markers
+*Figure 5F:* New biological processes regulated by Zic3
+
+*Extended Data:* DEG list
+
+## Nomenclature
+Throughout these markdowns, 'WT' refers to all 4 *Zic3^+/+* embryos together and Mut refers to all four *Zic3^Ka/Y* embryos together.
+
+Merged data refers to all 8 embryos (WT and Mut) together. 
+
+When individual embryos are analysed they will be referred to by their sample name: 
+- WT (*Zic3^+/+*) embryos are Sample 9, 10, 11 and 12. 
+- Mut (*Zic3^Ka/Y*) embryos are Sample 13, 14, 15 and 16. 
+
+
+## Installation and loading
+
+```{r packages}
+#General
+if(!require(tidyr))install.packages("tidyr")
+if(!require(readr))install.packages("readr")
+if(!require(plyr))install.packages("plyr")
+if(!require(dplyr))install.packages("dplyr")
+if(!require(ggplot2))install.packages("ggplot2")
+
+
+library(tidyr)
+library(readr)
+library(plyr) #load before dplyr
+library(dplyr) 
+library(ggplot2)
+
+# Heatmaps
+if (!require("dittoSeq")) {
+  install.packages("BiocManager")
+  BiocManager::install("dittoSeq")
+}
+library(dittoSeq)
+
+# DEG analysis
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install() #updates all bioc packages to prevent version conflicts
+BiocManager::install(c("DESeq2", "sctransform", "MatrixGenerics"))
+
+library(DESeq2)
+
+```
+
+## Colour schemes
+
+```{r}
+#create a vector colours in hex format ato generate PCA plots and heatmaps
+#heatmap.five.colors <- c("#440154","#3B528B","#21908C","#5DC863","#FDE725")
+heatmap.six.colors <- c("#404ba6", "#85bbda", "#e6f5f9", "#ffe5a1", "#f88354", "#b61931")
+#heatmap.three.colors <-c("#f2f3f5","#c20507","#0202b8")
+```
+
+Define colours that will be used in the dittoheatmap for the grouping annotations
+```{r}
+SampleColor <- list(sample.type = c(WT="#9d0501", Mut="#073763"))
+
+ClusterColor <- list(seurat_clusters = c("Amnion/Chorion"="#DA5CB5", "APS"="#6C6C6C", "Blood prog"="#1EB2C4", "DE"="#340042", "EmVE"="#78433B", "Epi"="#1B62A5", "ExEcto"="#AEB21B", "ExMes"="#814EAF", "ExVE"="#FC690F", "NasMes"="#FCE51E", "Node"="#0B5401", "PGCs"="#279321", "PS"="#CA101F"))
+
+OrigIDColor <- list(orig.ident = c("Sample9.WT" = "#ba0001", "Sample10.WT" = "#F46D75", "Sample11.WT" = "#Ffa6a4", "Sample12.WT" ="#f6c3c8", "Sample13.Mut" = "#015c92", "Sample14.Mut"="#0079bf", "Sample15.Mut" = "#5ba4cf", "Sample16.Mut" = "#bcd9ea"))
+```
+
+
+## Switching cell identities
+
+For the DEG analysis you may need to switch the active Idents from the cluster names to the sample names (depending on the question you are asking). Use this code to switch between the genotypes or cluster names as the active ident
+
+```{r}
+#Check what level is currently being used
+levels(Zic3data.merged)
+levels(WT)
+```
+
+```{r}
+#Turn on these idents if you want to sort based on clusters first
+Idents(Zic3data.merged) <- Zic3data.merged$seurat_clusters
+
+levels(Zic3data.merged)
+```
+
+```{r}
+#Turn on these idents if you want to sort based on genotype first
+Idents(Zic3data.merged) <- Zic3data.merged$sample.type
+
+levels(Zic3data.merged)
+```
+
+# 2. DEG markers per clusters
+
+FindMarkers = this analysis explores differentially expressed genes between specific clusters/identities. This is useful for comparing the differences between two specific groups. This is what should be used if trying to find DEgs between two treatments - you will likely need to loop through each cluster and subset to your cell of interest before comparing the conditions (already done above by defining sample.type).
+
+FindConservedMarkers = will find markers that are conserved between two groups - this can be useful if you want to find markers that are conserved between a treated and untreated condition for a specific cell type or group of cells. This can be useful if you want to find markers that are conserved between a treated and untreated condition for a specific cell type or group of cells. It means they are differentially expressed compared to other groups, but have similar expression between the two groups you're actually comparing.
+
+FindAllMarkers = compares each cluster/group against all others and outputs the genes that are differentially expressed/present to identify potential marker genes for each cluster. The cells in each cluster/group are treated as replicates, and essentially a differential expression analysis is performed with some statistical test. It will find markers differentially expressed in each identity group by comparing it to all of the others. NOTE: The default is a Wilcoxon Rank Sum test, but there are other options available.
+
+    logfc.threshold: minimum log2 fold change for average expression of gene in cluster relative to the average expression in all other clusters combined. Default is 0.25.
+
+    min.diff.pct: minimum percent difference between the percent of cells expressing the gene in the cluster and the percent of cells expressing gene in all other clusters combined.
+
+    min.pct: only test genes that are detected in a minimum fraction of cells in either of the two populations. Meant to speed up the function by not testing genes that are very infrequently expressed. Default is 0.1. 
+
+
+
+## FindAllMarkers: find markers for identification of clusters
+### All eight samples
+```{r}
+# Use FindAllMarkers to find marker genes for every cluster compared to all remaining cells
+# These are the DEGs that distinguish clusters from each other
+# If you only want the positive markers, change only.pos to T
+# Use seurat_clusters as the active ident, not sample.type
+
+clusterAll.markers <- FindAllMarkers(Zic3data.merged, only.pos = F, min.pct = 0.1, logfc.threshold = 0.25)
+
+head(clusterAll.markers)
+write.csv(clusterAll.markers, 'Outputs/clustermarkers_Alldata.csv', row.names=T)
+```
+
+In this instance, pct.1 is the percent of cells within the cluster that is being compared to all other clusters that express that gene (pct.2). e.g. if gene X gives a pct.1 value of 1 and a pct.2 value of 0.5 for cluster 'PS', that means that 100% of PS cells express gene X but only 50% of cells in all other clusters express gene X. 
+
+#### Heatmap 1: All samples by cluster
+
+```{r}
+# Define how many markers per cluster will be plotted on heatmap
+clusterAll.markers.top4 <- clusterAll.markers %>%
+  group_by(cluster) %>%
+  arrange(p_val_adj) %>%  # Sort by p_val_adj (ascending) or by avg_log2FC
+  slice_head(n = 4) -> top4  # Select top 4 markers
+```
+
+```{r, fig.width=15}
+# Calculate the cumulative sum of the number of cells in each cluster
+cluster_sizes <- tapply(Zic3data.merged$seurat_clusters, Zic3data.merged$seurat_clusters, length)
+cumulative_sizes <- cumsum(cluster_sizes)
+
+# Add a gap after each cluster
+gaps_col <- cumulative_sizes[-length(cumulative_sizes)] + 0.5
+
+# Generate the heatmap with the specified gaps
+HtMP_ClusterMarkers_All <- dittoHeatmap(Zic3data.merged, top5$gene,
+                          annot.by = c("seurat_clusters", "sample.type", "orig.ident"),
+                          order.by = "seurat_clusters",
+                          annotation_colors = c(ClusterColor, SampleColor, OrigIDColor),
+                          heatmap.colors = heatmap.six.colors,
+                          treeheight_row = 0, 
+                          treeheight_col = 0,
+                          breaks = c(-3, -2, -1, 0, 1, 2, 3),
+                          cluster_rows = FALSE,
+                          cluster_cols = FALSE, 
+                          gaps_col = gaps_col
+                      )
+
+ggsave(paste0("Outputs/HtMP_ClusterMarkers_All.png"), plot = HtMP_ClusterMarkers_All, width = 15, dpi = 300)
+
+```
+
+
+### WT samples only
+
+```{r}
+clusterWT.markers <- FindAllMarkers(WT, only.pos = F, min.pct = 0.1, logfc.threshold = 0.25)
+
+head(clusterWT.markers)
+
+write.csv(clusterWT.markers, 'Outputs/clustermarkers_WTonly.csv', row.names=T)
+```
+
+
+#### Supp Figure 5D: WT clusters heatmap
+
+
+```{r}
+clusterWT.markers %>%
+  group_by(cluster) %>%
+  arrange(p_val_adj) %>%  # Sort by p_val_adj (ascending)
+  slice_head(n = 4) -> top4WT  # Select top 4 markers
+```
+
+
+```{r, fig.width=8, fig.height=8}
+# Calculate the cumulative sum of the number of cells in each cluster
+cluster_sizes <- tapply(WT$seurat_clusters, WT$seurat_clusters, length)
+cumulative_sizes <- cumsum(cluster_sizes)
+
+# Add a gap after each cluster
+gaps_col <- cumulative_sizes[-length(cumulative_sizes)]
+
+# Generate the heatmap with the specified gaps
+HtMP_ClusterMarkers_WT <- dittoHeatmap(WT, top4WT$gene,
+                                        annot.by = c("seurat_clusters", "orig.ident"),
+                                        order.by = "seurat_clusters",
+                                        annotation_colors = c(ClusterColor, OrigIDColor),
+                                        heatmap.colors = heatmap.six.colors,
+                                        treeheight_row = 0, 
+                                        treeheight_col = 0,
+                                        breaks = c(-3, -2, -1, 0, 1, 2, 3),
+                                        cluster_rows = FALSE,
+                                        cluster_cols = FALSE, 
+                                        gaps_col = gaps_col,
+                                        #fontsize_row = 5, #from pheatmap, changes row label sizes
+                                       fontsize_col = 5, #from pheatmap, just changes col label sizes e.g. genes
+                                       fontsize = 5 #from pheatmap, changes all label sizes
+                                    )
+
+HtMP_ClusterMarkers_WT
+ggsave(paste0("Outputs/HtMP_ClusterMarkers_WT.png"), plot = HtMP_ClusterMarkers_WT, width = 15, dpi = 300)
+```
+
+
+
+
+# 3. DEGs between WT and Mut per cluster
+
+To find the individual clusters DEGs between the WT and Mut samples you need to:
+
+1) create a new column in the meta.data of Zic3data.merged that combines the sample.type (e.g. WT or Mut) with the cluster name (e.g. WT.APS, Mut.APS)
+
+2) set this meta.data column as the active identity for the object
+
+3) Run Findmarkers and set ident.1 to be the Mut.APS and ident.2 to be WT.APS. (or whatever clusters you are interested in). The results will tell you how ident1 has changed relative to ident2 e.g. that gene is up or downregulated in ident 1 relative to ident 2. 
+
+4) Create a for loop so it cycles through each of my clusters one at a time and joins all of the data together. 
+
+
+This will loop between each of 13 clusters and find DEGs between WT and Mut per cluster. Note: it takes about 5 mins to run.
+
+## Calculate DEGs
+
+```{r method4}
+#create new metadata column called sample.cluster
+Zic3data.merged$sample.cluster <- paste0(Zic3data.merged$sample.type, ".", Zic3data.merged$seurat_clusters)
+```
+
+Set it as the active ident
+```{r}
+Idents(Zic3data.merged) <- "sample.cluster"
+#check it has worked
+levels(Zic3data.merged)
+```
+
+
+Find DEGs for one specific cluster at a time
+
+**IMPORTANT: the ident1 is the condition that the results will be up or downregulated in compared to ident2. So if you want to know if a gene is up or downregulated in your mutant compared to your WT, then the needs to be listed as the first ident!!! Ident2 is essentially the control condition**
+
+```{r}
+#run FindMarkers for one of the specific clusters
+markers_output <- FindMarkers(Zic3data.merged, ident.1 = "WT.APS", ident.2 = "Mut.APS", assay = "RNA", 
+                                    grouping.var = "seurat_clusters")
+
+```
+
+```{r}
+head(markers_output, 50)
+```
+
+Find DEGs for all clusters via a iterative for loop
+
+**IMPORTANT: the ident1 is the condition that the results will be up or downregulated in compared to ident2. So if you want to know if a gene is up or downregulated in your mutant and compared to your WT, then the Mut needs to be listed as the first ident!!! Ident2 is essentially the control condition**
+
+This loop takes about 30-40 mins to run.
+
+```{r}
+# Create an empty list to store the results from each iteration of the loop
+all_markers_output <- list()
+
+# Extract the unique cluster names from sample.cluster that start with WT
+wt_clusters <- unique(grep("^WT\\.", Zic3data.merged$sample.cluster, value = TRUE))
+
+# Create a for loop to compare WT and Mut in each cluster
+for (wt_cluster in wt_clusters) {
+  # Extract the corresponding Mut sample cluster
+  mut_cluster <- sub("^WT\\.", "Mut.", wt_cluster)
+  
+  # Run FindMarkers for the current WT and Mut sample clusters
+  markers_output <- FindMarkers(Zic3data.merged, 
+                                ident.1 = mut_cluster, #ident1 is the sample that you want to know the degs for
+                                ident.2 = wt_cluster, #ident2 is the control that ident1 is being compared to
+                                assay = "RNA", 
+                                #grouping.var = "seurat_cluster", 
+                                test.use =  "DESeq2")
+  
+  # Extract the cluster name from the WT sample cluster
+  cluster <- sub("^WT\\.", "", wt_cluster)
+  
+  # Create a new column in markers_output dataframe with the cluster name
+  markers_output$cluster <- cluster
+  
+  # Create a new column in markers_output dataframe with the gene names
+  markers_output$gene_names <- row.names(markers_output)
+  
+  # Add the markers_output dataframe to the list
+  all_markers_output[[cluster]] <- markers_output
+}
+
+# Combine all the DEGs per cluster in the list into a single dataframe
+final_markers_output <- do.call(rbind, all_markers_output)
+
+```
+
+```{r}
+#check it has worked:
+head(final_markers_output, 25)
+```
+
+
+## Filter biologically irrelevant genes
+
+DESeq2 produces a complete list of DEGs, even if they are not significant. We need to filter out non-significant genes and also genes with a low fold change (-0.25< and >0.25) as these will not be biologically significant changes. 
+
+```{r}
+final_markers_output_filtered <- final_markers_output %>%
+  filter(
+    !is.na(p_val_adj),                          # Exclude rows where p_val_adj is NA
+    !(avg_log2FC >= -0.25 & avg_log2FC <= 0.25), # Exclude rows where avg_log2FC is between -0.25 and 0.25
+    p_val_adj <= 0.05                            # Exclude rows where p_val_adj > 0.05
+  )
+
+head(final_markers_output_filtered)
+```
+
+
+Certain gene families are artifacts from the sequencing process and will skew your DEG analysis (e.g. ribosomal and mitochondrial genes). Unless you are specifically investigating these genes, most people filter them out before running the DEG analysis. 
+
+```{r}
+#remove mitochondrial genes and ribosomal genes from dataset
+mt_genes <- final_markers_output_filtered$gene_names[grepl("^mt-", final_markers_output_filtered$gene_names)]
+rpl_genes <- final_markers_output_filtered$gene_names[grepl("^Rp[sl]", final_markers_output_filtered$gene_names)]
+
+mt_ribo <- c(mt_genes, rpl_genes)
+
+final_markers_output_filtered <- filter(final_markers_output_filtered, !(gene_names %in% mt_ribo))
+```
+
+
+## Count DEGs per cluster
+Create a list of how many DEGs between WT and Mut there are in each cluster:  
+```{r}
+# Count the number of rows per cluster
+cluster_counts <- table(final_markers_output$cluster)
+cluster_counts_filt <- table(final_markers_output_filtered$cluster)
+
+
+# Print the cluster counts
+print(cluster_counts)
+print(cluster_counts_filt)
+
+write.csv(cluster_counts, 'Outputs/DEGs_per_cluster.csv')
+write.csv(cluster_counts_filt, 'Outputs/DEGs_per_cluster_filt.csv')
+```
+
+
+## Save DEGs
+Save DEGs as one file for all clusters
+```{r}
+#save the single dataframe containing each of the DEGs per cluster
+write.csv(final_markers_output, "Outputs/DESeq2_DEGs_per_cluster.csv")
+write.csv(final_markers_output_filtered, "Outputs/DESeq2_DEGs_per_cluster_filtered.csv")
+```
+
+## Cleanup
+
+Use ls() to get a list of loaded objects, dataframes etc
+
+**Keep Zic3data.merged, WT and Mut loaded for downstream analysis.**
+
+
+```{r}
+#remove objects, dataframes and vectors that won't be needed again.
+rm(
+  all_markers_output, cluster, cluster_sizes, ClusterColor, 
+  clusterWT.markers, clusterWT.markers.top4, cumulative_sizes, 
+  final_markers_output, final_markers_output_filtered, gaps_col, 
+  heatmap.six.colors, HtMP_ClusterMarkers_WT, labels, 
+  markers_output, mt_genes, mt_ribo, mut_cluster, 
+  OrigIDColor, rpl_genes, SampleColor, top4WT, UMAP.cols.13, 
+  wt_cluster, wt_clusters
+)
+
+ls()
+```
+
+
+
+
+# 4. Dotplots of DEGs
+
+## Define gene lists
+
+Define list of genes you want to plot
+```{r}
+# mt-, rsp and rpl genes are removed from DEG list as they indicate cell stress and were skewing the colours of the other genes
+
+Apopprolif <- c(
+              "Trp53", "Casp3", "Atm", "Myc", "Hist1h3c", "Hist1h3e", "Bub1", "Mki67", "H3f3a",
+              "H3f3b"
+              )
+
+Lineage_markers <- c("Pou5f1", "Pou3f1", "Sox2","Nanog", "Utf1", #epi lineage
+                    "Fgf8", "Mixl1", "Cdx2", "Tbx6", "Mesp1", #PS lineage
+                    "Gsc", "Otx2", "Foxh1", #APS lineage
+                    "Noto", "Zic2", "Nodal", "Foxj1", #node lineage
+                    "Foxa2", "T", "Eomes", #mesendoderm lineage
+                    "Sox17", "Rab15", "Gata6", "Pdgfra", "Anxa4", "Emb", #pan-endoderm lineage
+                    "Trh", "Cer1", "Hhex", "Dkk1", #DE lineage
+                    "Foxq1", "Lhx1", "Sox4", "Lefty1", #EmVE lineage
+                    "Apln", "Apoa2", "Cited1", "Foxo4", #ExVE lineage
+                    "Ttr", "Xlr3a", "Apoa1", "Dab2" #pan-VE
+                    )
+
+ECM_markers <- c(
+                "Slc9a3r1", #A-B polarity
+                "Fn1", "Lamc1", "Lama1", "Lamb1", #ECM
+                "Adamts9", "Adam19"
+                ) #metalloproteinases
+
+
+EMT_markers <- c(
+                "Tcf3", "Zeb2", 
+                "Vim"
+                ) #mesenchymal fate
+
+Cell_adhesion <- c(
+                "Cldn7", "Tjp1", # tight junctions
+                "Cdh1", "Cdh2", "Afdn",  #adherens junctions
+                "Fgfr1", "Igf1r", #cadherin interactions
+                "Ctnnb1",  #catenins
+                "Actn1", "Actn4", "Vcl", "Fmnl2", "Lima1", "Rock1", "Rock2", # actin cytoskeleton
+                "Dsp",  #desmosomes 
+                "Krt7", "Krt19" #intermediate fillaments
+                )
+
+Zic3_exp <- c("Zic2", "Zic3", "Zic5") # all clusters
+
+Lipogenesis <- c("Apoa1", "Apoa4", "Apob", "Apoc2", "Apoe", "Apom") # all clusters
+
+RA_signalling <-c("Ttr", "Rbp1", "Rbp4", "Cyp26a1", "Hoxb1", "Rara", "Nanog") # all clusters
+
+
+Cell_morphology <- c(ECM_markers, EMT_markers, Cell_adhesion)
+Newbiomarkers <- c(Zic3_exp, Lipogenesis, RA_signalling)
+```
+
+```{r}
+#Check what level is currently being used
+levels(Zic3data.merged)
+
+# Switch back to original cluster IDs
+Idents(Zic3data.merged) <- Zic3data.merged$seurat_clusters
+
+levels(Zic3data.merged)
+```
+
+
+## Apoptosis and Proliferation
+
+```{r}
+# Generate new seurat object otherwise you will filter out important data in below steps
+Zic3data.merged.dot <- Zic3data.merged
+```
+
+```{r}
+# Specify the clusters you want to plot as a vector
+refine_clusters <- c("Amnion/Chorion" , "APS", "Blood prog", "DE", "ExEcto", "ExVE", "Node", "PS")  
+
+# Create a condition to filter cells based on the specified clusters
+plot_clusters <- Zic3data.merged.dot$seurat_clusters %in% refine_clusters 
+
+# Reorder the levels of the seurat_clusters factor to match the order in refine_clusters
+Zic3data.merged.dot$seurat_clusters <- factor(Zic3data.merged.dot$seurat_clusters, levels = refine_clusters)
+ 
+# Reorder the levels of the sample.type factor so that "WT" is plotted first
+Zic3data.merged.dot$sample.type <- factor(Zic3data.merged.dot$sample.type, levels = c("WT", "Mut"))
+
+```
+
+```{r}
+# Reverse the order of the Apopprolif vector other wise it will plot your first gene last
+Apopprolif_rev <- rev(Apopprolif)
+```
+
+### Figure 4D: Apoptosis and Proliferation DEGs
+```{r, fig.height=4, fig.width=5}
+ApopprolifDotPlot <- dittoDotPlot(Zic3data.merged.dot, 
+                      Apopprolif_rev,
+                      assay = "RNA",
+                      group.by = "sample.type", 
+                      split.by = "seurat_clusters",
+                      min.color = "#d1f5f9",
+                      max.color = "#4833a3",
+                      cells.use = plot_clusters,
+                      scale = TRUE,
+                      min.percent = 0,
+                      max.percent = 1,
+                      size = 6,
+                      split.nrow =1 #keeps entire graph on one line instead of splitting across multiple
+                       ) +
+                  coord_flip()+
+                  theme(
+                    legend.position = "top", #puts scale on top. can be right, left, etc if needed
+                    legend.key.size = unit(0.5, 'cm'),
+                    legend.title = element_text(size=6), #change legend title font size
+                    legend.text = element_text(size=6)
+                    )
+
+print (ApopprolifDotPlot)
+ggsave(paste0("Outputs/Dotplot_apoptosis_proliferation.png"), plot = ApopprolifDotPlot, width = 5, dpi = 300)
+```
+
+
+
+
+
+## Cell lineage
+
+```{r}
+# Regenerate new seurat object otherwise you will only be able to plot clusters defined for previous dotplot
+Zic3data.merged.dot <- Zic3data.merged
+```
+
+```{r}
+# Specify the clusters you want to plot as a vector
+refine_clusters <- c("Epi", "PS", "APS", "Node", "DE", "EmVE", "ExVE")  
+
+# Create a condition to filter cells based on the specified clusters
+plot_clusters <- Zic3data.merged.dot$seurat_clusters %in% refine_clusters 
+
+# Reorder the levels of the seurat_clusters factor to match the order in refine_clusters
+Zic3data.merged.dot$seurat_clusters <- factor(Zic3data.merged.dot$seurat_clusters, levels = refine_clusters)
+
+# Reorder the levels of the sample.type factor so that "WT" is plotted first
+Zic3data.merged.dot$sample.type <- factor(Zic3data.merged.dot$sample.type, levels = c("WT", "Mut"))
+
+```
+
+```{r}
+# Reverse the order of the Lineage_markers vector otherside it will plot your first gene last
+Lineage_markers_rev <- rev(Lineage_markers)
+```
+
+### Figure 5A: Lineage Marker Expression
+
+```{r, fig.height=10, fig.width=5}
+LineageDotPlot <- dittoDotPlot(Zic3data.merged.dot, 
+                      Lineage_markers_rev,
+                      assay = "RNA",
+                      group.by = "sample.type", 
+                      split.by = "seurat_clusters",
+                      min.color = "#d1f5f9",
+                      max.color = "#4833a3",
+                      cells.use = plot_clusters,
+                      scale = TRUE,
+                      min.percent = 0,
+                      max.percent = 1,
+                      size = 6,
+                      split.nrow =1 #keeps entire graph on one line instead of splitting across multiple
+                       ) +
+                  coord_flip()+
+                  theme(
+                    legend.position = "top", #puts scale on top. can be right, left, etc if needed
+                    legend.key.size = unit(0.5, 'cm'),
+                    legend.title = element_text(size=6), #change legend title font size
+                    legend.text = element_text(size=6)
+                    )
+
+print (LineageDotPlot)
+
+ggsave(paste0("Outputs/Dotplot_lineagemarkers.png"), plot = LineageDotPlot, width = 5, dpi = 300)
+```
+
+
+## Cell morphology characteristics
+
+Filtered DEGs for EMT, ECM and cell polarity markers plotted together
+
+```{r}
+# Regenerate new seurat object otherwise you will only be able to plot clusters defined for previous dotplot
+Zic3data.merged.dot <- Zic3data.merged
+```
+
+```{r}
+# Specify the clusters you want to plot as a vector
+refine_clusters <- c("Epi", "PS", "APS", "Node", "DE", "EmVE", "ExVE")  
+
+# Create a condition to filter cells based on the specified clusters
+plot_clusters <- Zic3data.merged.dot$seurat_clusters %in% refine_clusters 
+
+# Reorder the levels of the seurat_clusters factor to match the order in refine_clusters
+Zic3data.merged.dot$seurat_clusters <- factor(Zic3data.merged.dot$seurat_clusters, levels = refine_clusters)
+
+# Reorder the levels of the sample.type factor so that "WT" is plotted first
+Zic3data.merged.dot$sample.type <- factor(Zic3data.merged.dot$sample.type, levels = c("WT", "Mut"))
+
+```
+
+```{r}
+# Reverse the order of the Lineage_markers vector otherside it will plot your first gene last
+Cell_morphology <- rev(Cell_morphology)
+```
+
+### Supp Figure 6B: Cell morphology, adhesion and polarity markers
+
+```{r, fig.height=7.5, fig.width=4.5}
+CellmorphDotPlot <- dittoDotPlot(Zic3data.merged.dot, 
+                      Cell_morphology,
+                      assay = "RNA",
+                      group.by = "sample.type", 
+                      split.by = "seurat_clusters",
+                      min.color = "#d1f5f9",
+                      max.color = "#4833a3",
+                      cells.use = plot_clusters,
+                      scale = TRUE,
+                      min.percent = 0,
+                      max.percent = 1,
+                      size = 6,
+                      split.nrow =1 #keeps entire graph on one line instead of splitting across multiple
+                       ) +
+                  coord_flip()+
+                  theme(
+                    legend.position = "top", #puts scale on top. can be right, left, etc if needed
+                    legend.key.size = unit(0.5, 'cm'),
+                    legend.title = element_text(size=6), #change legend title font size
+                    legend.text = element_text(size=6)
+                    )
+
+print (CellmorphDotPlot)
+
+ggsave(paste0("Outputs/Dotplot_cellmorphology.png"), plot = CellmorphDotPlot, width = 5, dpi = 300)
+```
+
+##New Biomarkers
+DEGs that were identified as interesting pathways/genes via GO terms
+
+```{r}
+# Regenerate new seurat object otherwise you will only be able to plot clusters defined for previous dotplot
+Zic3data.merged.dot <- Zic3data.merged
+```
+
+```{r}
+# Specify the clusters you want to plot as a vector
+refine_clusters <- c("Epi" , "PS", "NasMes", "APS", "Node", "DE", "EmVE", "ExVE", "ExEcto", "ExMes", "Amnion/Chorion", "Blood prog", "PGCs")  
+
+# Create a condition to filter cells based on the specified clusters
+plot_clusters <- Zic3data.merged.dot$seurat_clusters %in% refine_clusters 
+
+# Reorder the levels of the seurat_clusters factor to match the order in refine_clusters
+Zic3data.merged.dot$seurat_clusters <- factor(Zic3data.merged.dot$seurat_clusters, levels = refine_clusters)
+
+# Reorder the levels of the sample.type factor so that "WT" is plotted first
+Zic3data.merged.dot$sample.type <- factor(Zic3data.merged.dot$sample.type, levels = c("WT", "Mut"))
+
+```
+
+```{r}
+# Reverse the order of the Lineage_markers vector otherside it will plot your first gene last
+Newbiomarkers <- rev(Newbiomarkers)
+```
+
+### Figure 5F: New biological processes regulated by Zic3
+
+```{r, fig.height=6, fig.width=7}
+NewBioDotPlot <- dittoDotPlot(Zic3data.merged.dot,
+                      Newbiomarkers,
+                      assay = "RNA",
+                      group.by = "sample.type", 
+                      split.by = "seurat_clusters",
+                      min.color = "#d1f5f9",
+                      max.color = "#4833a3",
+                      scale = TRUE,
+                      min.percent = 0,
+                      max.percent = 1,
+                      size = 6,
+                      cells.use = plot_clusters,
+                      split.nrow =1 #keeps entire graph on one line instead of splitting across multiple
+                       ) +
+                  coord_flip()+
+                  theme(
+                    legend.position = "top", #puts scale on top. can be right, left, etc if needed
+                    legend.key.size = unit(0.5, 'cm'),
+                    legend.title = element_text(size=6), #change legend title font size
+                    legend.text = element_text(size=6)
+                    )
+                     
+
+print (NewBioDotPlot)
+ggsave(paste0("Outputs/Dotplot_newbiologicalprocesses.png"), plot = NewBioDotPlot, width = 7, dpi = 300)
+```
+
+## Cleanup
+```{r}
+rm(
+  Apop_prolif, Apopprolif, Apopprolif_rev, ApopprolifDotPlot, Cell_adhesion,
+  Cell_morphology, CellmorphDotPlot, cluster_counts, cluster_counts_filt, clusters_to_plot,
+  current_names, DEGs_all, DEGs_filtered, Dot_apop_prolif, dot_data,
+  dot_data_df, dotplot_list, DotPlotMarkers, DotPlotMarkers_50, DotPlotMarkers_DE_50_rev,
+  ECM_markers, EMT_markers, i, Lineage_markers, Lineage_markers_rev,
+  LineageDotPlot, Lipogenesis, new_names, new_order,
+  NewBioDotPlot, Newbiomarkers, plot_clusters, plot_name, RA_signalling,
+  refine_clusters, sample.id, sample.ids, sample.name, sample.type,
+  UMAP_merged, Zic3_exp, 
+  Zic3data.merged.dot, Zic3Mut, Zic3WT
+)
+
+
+ls()
+```
+
+
+
+
+
+
+
+
+
+

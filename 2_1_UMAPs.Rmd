@@ -1,0 +1,911 @@
+---
+title: "Zic3Ka/Y scRNA-seq gene expression 2.1 UMAPs"
+output: html_notebook
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# 1. Start
+
+This markdown covers 2D and 3D UMAP generation, and differential
+abundance plot generation and statistics.
+
+**NOTE: you will need to load the RDS Seurat object and run the first
+steps up to completing UMAP generation before you can do any analysis
+using the other markdowns.**
+
+## Figures used in paper
+
+*Figure 4A:* UMAPs for all 8 samples merged together and individual
+UMAPs per genotype (WT and Ka/Y)
+
+*Sup. Figure 5B:* UMAPs for each individual sample (all 8)
+
+*Figure 4B:* 3D UMAPs
+
+*Figure 4C and Supp Figure 5C:* Cell Type Proportions WT vs Mut
+
+## Nomenclature
+
+Throughout these markdowns, 'WT' refers to all 4 *Zic3\^+/+* embryos
+together and Mut refers to all four *Zic3\^Ka/Y* embryos together.
+
+Merged data refers to all 8 embryos (both WT and Mut) together.
+
+When individual embryos are analysed they will be referred to by their
+sample name: - WT (*Zic3^+/+)^* embryos are Sample 9, 10, 11 and 12. -
+Mut (*Zic3^Ka/Y^*) embryos are Sample 13, 14, 15 and 16.
+
+## Installation and loading
+
+*Using the Seurat package for the first time will take a long time to
+install.*
+
+```{r}
+# For analysisng scRNA-seq object
+if(!require(Seurat))remotes::install_version("Seurat", version = "4.3.0")
+library(Seurat)
+
+# For data analysis
+if(!require(tidyr))install.packages("tidyr")
+if(!require(readr))install.packages("readr")
+if(!require(dplyr))install.packages("dplyr")
+library(tidyr)
+library(readr)
+library(dplyr) #for reading %>% symbol
+
+
+# For generating plots
+if(!require(ggplot2))install.packages("ggplot2")
+library(ggplot2)
+
+# for 3D UMAPs
+if(!require(plotly))install.packages("plotly")
+if(!require(htmlwidgets))install.packages("htmlwidgets")
+library(plotly)
+library(htmlwidgets)
+
+
+# For calculating differential cluster abundance
+if(!require(reshape2))install.packages("reshape2")
+if(!require(stringr))install.packages("stringr")
+library(reshape2)
+library(stringr)
+```
+
+## Define colour schemes
+
+```{r}
+UMAP.cols.13 <- c("#DA5CB5", "#6C6C6C", "#1EB2C4", "#340042", "#78433B", "#1B62A5", "#AEB21B", "#814EAF", "#FC690F", "#FCE51E", "#0B5401", "#279321", "#CA101F")
+```
+
+## Set WD
+
+Run this directly in the consol and not in a chunk, otherwise it will
+only set it as the wd for that chunk and not the entire doc.
+
+setwd("\~/Desktop/download this folder/All merge for
+Kristen/Zic3_WNT_project")
+
+# 2. Load object
+
+## Read data from the scRNA-seq object
+
+Reads Zic3data.merged.rds file that has been through normalisation and
+cleanup (Code Part 1). Assign it as a Seurat object called
+'Zic3data.merged'
+
+Info on navigating seurat objects:
+[Seurat](https://satijalab.org/seurat/articles/essential_commands.html#data-access-1)
+
+```{r}
+Zic3data.merged <- readRDS("~/Desktop/download this folder/All merge for Kristen/Zic3_WNT_project/ALL.merge.anno.rds")
+
+# Create a vector of sample IDs 9-16 and assigns it as 'sample.id' function. 9-12 are Wt and 13-16 are mutant
+sample.id <- 9:16
+
+# Create a vector of sample names by linking 'sample' with sample ID numbers and either WT or KaY genotypes
+sample.name <- c(rep('black', (sample.id[1]-1)), paste0("Sample", 9:12, ".WT"), paste0("Sample", 13:16, ".Mut"))
+```
+
+## Set up cell identities
+
+Get the values from the orig.ident column in the Zic3data.merged object
+and assign it to idents. This sets up cell identities for downstream
+analysis so you can track which embryo a cell came from and call upon
+specific embryo samples during the analysis.
+
+```{r}
+# Set identities
+Idents(Zic3data.merged) <- Zic3data.merged$orig.ident
+# Check it has worked
+levels(Zic3data.merged)
+```
+
+## Subset into WT and Mut dataframes
+
+Create a new dataframe called WT and one called Mut by subsetting the
+Zic3data.merged dataframe based on the sample identities specified in
+previous line.
+
+Use invert = F to ensure that the WT or Mut subset only includes the
+specified samples. If it was set to T it would include all samples other
+than those listed.
+
+```{r}
+WT <- subset(x = Zic3data.merged, idents = sample.name[9:12], invert=F)
+Mut <- subset(x = Zic3data.merged, idents = sample.name[13:16], invert=F)
+```
+
+Add a new column to the metadata in the Zic3data.merged object to tracks
+if it is from a WT or Mut sample. This is needed for some downstream
+analysis (e.g. DEGs)
+
+```{r}
+# Create a vector of sample types for each cell
+sample.type <- rep(NA, ncol(Zic3data.merged))
+
+# Extract the sample IDs from the sample name column
+sample.ids <- gsub("Sample", "", gsub("\\..*", "", Zic3data.merged@meta.data$orig.ident))
+
+# Assign "WT" to samples 9-12 and "Mut" to samples 13-16
+sample.type[which(sample.ids %in% 9:12)] <- "WT"
+sample.type[which(sample.ids %in% 13:16)] <- "Mut"
+
+# Add the sample_type column to the metadata of the Seurat object
+Zic3data.merged[["sample.type"]] <- sample.type
+
+# Convert the sample_type column to a factor
+Zic3data.merged$sample.type <- factor(Zic3data.merged$sample.type)
+
+# Check the first few rows of the metadata to verify the new column was added
+head(Zic3data.merged@meta.data)
+```
+
+To remove any extra meta.data columns that you don't need, use
+Zic3data.merged\$sample_type \<- NULL where sample_type is the name of
+the column.
+
+## Set up clustering identities
+
+Similar to above, but assigns the cluster identities from the
+'seurate_clusters' column of the Zic3data.merged object to the 'idents'
+attribute of the same object.
+
+This sets up the clustering identities for each cell so you can call
+upon specific clusters in downstream analysis.
+
+```{r}
+# Set up cluster identities
+Idents(Zic3data.merged) <- Zic3data.merged$seurat_clusters
+
+# Assigns the values in the 'seurate_clusters' column in the WT or Mut object to the Idents attribute of the same object. This gives the cells their clustering identity. 
+Idents(WT) <- WT$seurat_clusters
+Idents(Mut) <- Mut$seurat_clusters
+
+# Check active idents
+levels(Zic3data.merged)
+levels(WT)
+levels(Mut)
+```
+
+```{r}
+#KYLE YOU CAN REMOVE THIS IF DI HAS FIXED IN HIS PRIOR CODE
+
+# Rename VE to ExVE and AVE to EmVe
+new_names <- c("Amnion/Chorion","APS","EmVE","Blood prog","DE","Epi","ExEcto","ExMes","NasMes","Node","PGCs","PS","ExVE")
+
+names(new_names) <- levels(Zic3data.merged)
+
+Zic3data.merged <- RenameIdents(Zic3data.merged, new_names)
+
+# Change in metadata
+# Get the current cluster names
+current_names <- levels(Zic3data.merged$seurat_clusters)
+
+# Change the cluster names in the metadata
+Zic3data.merged$seurat_clusters <- factor(Zic3data.merged$seurat_clusters, levels = current_names, labels = new_names)
+```
+
+```{r}
+# Change the meta.data order so they're alphabetical
+new_order <- c("Amnion/Chorion","APS","Blood prog","DE","EmVE","Epi", "ExEcto","ExMes","ExVE","NasMes","Node","PGCs","PS")
+
+Zic3data.merged@meta.data[["seurat_clusters"]] <- factor(Zic3data.merged@meta.data[["seurat_clusters"]], levels = new_order)
+
+# Update the active ident based on the new order
+Idents(Zic3data.merged) <- factor(x = Idents(Zic3data.merged), levels = sort(levels(Zic3data.merged)))
+```
+
+```{r}
+# Create new metadata column called sample.cluster
+Zic3data.merged$sample.cluster <- paste0(Zic3data.merged$sample.type, ".", Zic3data.merged$seurat_clusters)
+```
+
+```{r}
+# WT
+# Change active idents
+names(new_names) <- levels(WT)
+
+WT <- RenameIdents(WT, new_names)
+
+# Change in metadata
+# Get the current cluster names
+current_names <- levels(WT$seurat_clusters)
+
+# Change the cluster names in the metadata
+WT$seurat_clusters <- factor(WT$seurat_clusters, levels = current_names, labels = new_names)
+
+# Change the meta.data order so they're alphabetical
+WT@meta.data[["seurat_clusters"]] <- factor(WT@meta.data[["seurat_clusters"]], levels = new_order)
+
+# Update the active ident based on the new order
+Idents(WT) <- factor(x = Idents(WT), levels = sort(levels(WT)))
+
+
+# Mut
+# Change active idents
+names(new_names) <- levels(Mut)
+
+Mut <- RenameIdents(Mut, new_names)
+
+# Change in metadata
+# Get the current cluster names
+current_names <- levels(Mut$seurat_clusters)
+
+# Change the cluster names in the metadata
+Mut$seurat_clusters <- factor(Mut$seurat_clusters, levels = current_names, labels = new_names)
+
+# Change the meta.data order so they're alphabetical
+Mut@meta.data[["seurat_clusters"]] <- factor(Mut@meta.data[["seurat_clusters"]], levels = new_order)
+
+# Update the active ident based on the new order
+Idents(Mut) <- factor(x = Idents(Mut), levels = sort(levels(Mut)))
+```
+
+```{r}
+# Replace the original seurat_clusters values with the new names
+Zic3data.merged$seurat_clusters <- Zic3data.merged@meta.data$seurat_clusters
+
+# For WT and Mut objects
+WT$seurat_clusters <- WT@meta.data$seurat_clusters
+Mut$seurat_clusters <- Mut@meta.data$seurat_clusters
+
+```
+
+# 3. 2D UMAPs
+
+## Merged data UMAPs
+
+### Figure 4A_1: UMAP all 8 samples together
+
+The plots in this markdown are all generated in R studio and directly
+saved. An alternative if to give each plot a name (e.g. UMAP_All \<-
+Dimplot) and then you can view the plot using print (UMAP_All) and save
+it using ggsave("UMAP_All", width=X, height = X, units =X, dpi = 300)
+and it will save in your active wd().
+
+```{r}
+UMAP_merged <- DimPlot(Zic3data.merged, 
+        reduction = "umap", 
+        label = F,
+        #label.color = "black",
+        repel = T, 
+        label.size = 2,
+        cols = UMAP.cols.13
+  ) + 
+  labs(title = "Clusters in All Eight Samples" 
+    )+
+   theme(axis.title = element_text(size=10),
+        legend.text=element_text(size=10)
+        )
+
+print(UMAP_merged)
+
+#save as 7 x 10 in for individual dots, 5 x 7 for medium dots and 3 x 5 for condensed clusters
+ggsave("Outputs/UMAP_merged_wide.tiff", plot = UMAP_merged, dpi=300, height = 7, width = 10, units = "in")
+```
+
+### Figure 4A_2: UMAP WT vs Mut plots
+
+```{r}
+#Format the embryo genotypes so they appear in the correct nomenclature on the UMAP plots
+Zic3WT <- bquote(paste("All four ", italic("Zic3"), ""^italic ("+/+"), " samples"))
+Zic3Mut <- bquote(paste("All four ", italic("Zic3"), ""^italic ("Ka/Y"), " samples"))
+```
+
+```{r, fig.width=10, fig.height = 3}
+#Use this one to save HQ cluster images
+
+# WT subset UMAP
+UMAP_WT <- DimPlot(WT, 
+        reduction = "umap", 
+        #label = T,
+        label.color = "black", 
+        repel = T, 
+        label.size = 4, 
+        cols = UMAP.cols.13) + 
+        labs(title = Zic3WT)+
+        theme(
+              axis.title = element_text(size=10),
+              legend.text=element_text(size=10)
+              )
+
+# Mut subset UMAP
+UMAP_Mut <- DimPlot(Mut, 
+        reduction = "umap", 
+        #label = T,
+        label.color = "black", 
+        repel = T, 
+        label.size = 4, 
+        cols = UMAP.cols.13) + 
+        labs(title = Zic3Mut)+
+        theme(
+              axis.title = element_text(size=10),
+              legend.text=element_text(size=10)
+              )
+
+print(UMAP_WT + UMAP_Mut)
+
+#save as 7 x 10 in for individual dots, 5 x 7 for medium dots and 3 x 5 for condensed clusters
+ggsave("Outputs/UMAP_WT_small.tiff", plot = UMAP_WT, dpi=300, height = 3, width = 5, units = "in")
+ggsave("Outputs/UMAP_Mut_small.tiff", plot = UMAP_Mut, dpi=300, height = 3, width = 5, units = "in")
+```
+
+**All of the above, each time the R file is restarted, must and only
+needs to be run once.**
+
+## Individual sample UMAPs
+
+OPTIONAL: Assign idents to individual samples. Only need to run if you
+are looking at specific samples.
+
+```{r}
+# First, set the active ident back to the original identities instead of the clusters
+Idents(Zic3data.merged) <- Zic3data.merged$orig.ident
+
+#then subset
+WT9 <- subset(x = Zic3data.merged, idents = sample.name[9], invert=F)
+WT10 <- subset(x = Zic3data.merged, idents = sample.name[10], invert=F)
+WT11 <- subset(x = Zic3data.merged, idents = sample.name[11], invert=F)
+WT12 <- subset(x = Zic3data.merged, idents = sample.name[12], invert=F)
+Mut13 <- subset(x = Zic3data.merged, idents = sample.name[13], invert=F)
+Mut14 <- subset(x = Zic3data.merged, idents = sample.name[14], invert=F)
+Mut15 <- subset(x = Zic3data.merged, idents = sample.name[15], invert=F)
+Mut16 <- subset(x = Zic3data.merged, idents = sample.name[16], invert=F)
+```
+
+Assign idents to individual samples. Only need to run if you are looking
+at specific samples.
+
+```{r}
+# Assigns the values in the 'seurat_clusters' column in the WT dataframe to the Idents attribute of the same dataframe. This gives the cells from the WT samples the clustering identity. 
+
+Idents(WT9) <- WT9$seurat_clusters
+Idents(WT10) <- WT10$seurat_clusters
+Idents(WT11) <- WT11$seurat_clusters
+Idents(WT12) <- WT12$seurat_clusters
+Idents(Mut13) <- Mut13$seurat_clusters
+Idents(Mut14) <- Mut14$seurat_clusters
+Idents(Mut15) <- Mut15$seurat_clusters
+Idents(Mut16) <- Mut16$seurat_clusters
+```
+
+### Sup Figure 4B_1: Individual WT samples.
+
+Can only use if you have defined the individual sample idents above.
+
+```{r, fig.height = 5, fig.width = 10}
+Zic3WT9 <- bquote(paste(italic("Zic3"), ""^italic ("+/+"), " sample 9"))
+Zic3WT10 <- bquote(paste(italic("Zic3"), ""^italic ("+/+"), " sample 10"))
+Zic3WT11 <- bquote(paste(italic("Zic3"), ""^italic ("+/+"), " sample 11"))
+Zic3WT12 <- bquote(paste(italic("Zic3"), ""^italic ("+/+"), " sample 12"))
+
+PlotWT9 <- DimPlot(WT9, reduction = "umap", #label = T,
+            label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+            ) + 
+            labs(title = Zic3WT9)+
+            theme(
+              text = element_text(size = 10),    
+              axis.title = element_text(size=7.5),
+              axis.text.x=element_text(size= 7.5),
+              axis.text.y=element_text(size= 7.5),
+              legend.text=element_text(size=7.5)
+                  )
+
+PlotWT10 <- DimPlot(WT10, reduction = "umap", #label = T,
+            label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+            ) + 
+            labs(title = Zic3WT10)+
+            theme(
+                 text = element_text(size = 10),    
+              axis.title = element_text(size=7.5),
+              axis.text.x=element_text(size= 7.5),
+              axis.text.y=element_text(size= 7.5),
+              legend.text=element_text(size=7.5)
+                  )
+
+PlotWT11 <- DimPlot(WT11, reduction = "umap", #label = T,
+            label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+            ) + 
+            labs(title = Zic3WT11)+
+            theme(
+                  text = element_text(size = 10),    
+              axis.title = element_text(size=7.5),
+              axis.text.x=element_text(size= 7.5),
+              axis.text.y=element_text(size= 7.5),
+              legend.text=element_text(size=7.5)
+                  )
+
+PlotWT12 <- DimPlot(WT12, reduction = "umap", #label = T,
+            label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+            ) + 
+            labs(title = Zic3WT12)+
+            theme(
+                  text = element_text(size = 10),    
+              axis.title = element_text(size=7.5),
+              axis.text.x=element_text(size= 7.5),
+              axis.text.y=element_text(size= 7.5),
+              legend.text=element_text(size=7.5)
+                  )
+
+print (PlotWT9 + PlotWT10 + PlotWT11 + PlotWT12)
+
+ggsave("Outputs/UMAP_WT9_medium.tiff", plot = PlotWT9, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_WT9_small.tiff", plot = PlotWT9, dpi=300, height = 3, width = 5, units = "in")
+ggsave("Outputs/UMAP_WT10_medium.tiff", plot = PlotWT10, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_WT10_small.tiff", plot = PlotWT10, dpi=300, height = 3, width = 5, units = "in")
+ggsave("Outputs/UMAP_WT11_medium.tiff", plot = PlotWT11, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_WT11_small.tiff", plot = PlotWT11, dpi=300, height = 3, width = 5, units = "in")
+ggsave("Outputs/UMAP_WT12_medium.tiff", plot = PlotWT12, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_WT12_small.tiff", plot = PlotWT12, dpi=300, height = 3, width = 5, units = "in")
+```
+
+### Sup Figure 4B_2: Individual Mut samples.
+
+```{r, fig.height = 5, fig.width = 10}
+Zic3Mut13 <- bquote(paste(italic("Zic3"), ""^italic ("Mut/Y"), " sample 13"))
+Zic3Mut14 <- bquote(paste(italic("Zic3"), ""^italic ("Mut/Y"), " sample 14"))
+Zic3Mut15 <- bquote(paste(italic("Zic3"), ""^italic ("Mut/Y"), " sample 15"))
+Zic3Mut16 <- bquote(paste(italic("Zic3"), ""^italic ("Mut/Y"), " sample 16"))
+
+PlotMut13 <- DimPlot(Mut13, reduction = "umap", #label = T,
+              label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+              ) + 
+              labs(title = Zic3Mut13)+
+              theme(
+                text = element_text(size = 10),    
+                axis.title = element_text(size=7.5),
+                axis.text.x=element_text(size= 7.5),
+                axis.text.y=element_text(size= 7.5),
+                legend.text=element_text(size=7.5)
+                    )
+
+PlotMut14 <- DimPlot(Mut14, reduction = "umap", #label = T,
+              label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+              ) + 
+              labs(title = Zic3Mut14)+
+              theme(
+                   text = element_text(size = 10),    
+                axis.title = element_text(size=7.5),
+                axis.text.x=element_text(size= 7.5),
+                axis.text.y=element_text(size= 7.5),
+                legend.text=element_text(size=7.5)
+                    )
+
+PlotMut15 <- DimPlot(Mut15, reduction = "umap", #label = T,
+              label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+              ) + 
+              labs(title = Zic3Mut15)+
+              theme(
+                    text = element_text(size = 10),    
+                axis.title = element_text(size=7.5),
+                axis.text.x=element_text(size= 7.5),
+                axis.text.y=element_text(size= 7.5),
+                legend.text=element_text(size=7.5)
+                    )
+
+PlotMut16 <- DimPlot(Mut16, reduction = "umap", #label = T,
+              label.color = "black", repel = T, label.size = 4, cols = UMAP.cols.13
+              ) + 
+              labs(title = Zic3Mut16)+
+              theme(
+                    text = element_text(size = 10),    
+                axis.title = element_text(size=7.5),
+                axis.text.x=element_text(size= 7.5),
+                axis.text.y=element_text(size= 7.5),
+                legend.text=element_text(size=7.5)
+                    )
+
+print (PlotMut13 + PlotMut14 + PlotMut15 + PlotMut16)
+
+ggsave("Outputs/UMAP_Mut13_medium.tiff", plot = PlotMut13, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_Mut13_small.tiff", plot = PlotMut13, dpi=300, height = 3, width = 5, units = "in")
+ggsave("Outputs/UMAP_Mut14_medium.tiff", plot = PlotMut14, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_Mut14_small.tiff", plot = PlotMut14, dpi=300, height = 3, width = 5, units = "in")
+ggsave("Outputs/UMAP_Mut15_medium.tiff", plot = PlotMut15, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_Mut15_small.tiff", plot = PlotMut15, dpi=300, height = 3, width = 5, units = "in")
+ggsave("Outputs/UMAP_Mut16_medium.tiff", plot = PlotMut16, dpi=300, height = 5, width = 7, units = "in")
+ggsave("Outputs/UMAP_Mut16_small.tiff", plot = PlotMut16, dpi=300, height = 3, width = 5, units = "in")
+```
+
+```{r}
+# Set idents back to clusters
+Idents(Zic3data.merged) <- Zic3data.merged$seurat_clusters
+Idents(WT) <- WT$seurat_clusters
+Idents(Mut) <- Mut$seurat_clusters
+
+levels(Zic3data.merged)
+```
+
+## Cleanup
+
+**Keep Zic3data.merged, WT and Mut loaded for downstream analysis.**
+
+```{r}
+# Remove objects, dataframes and vectors that won't be needed again.
+rm(Mut13, Mut14, Mut15, Mut16, PlotMut13, PlotMut14, PlotMut15, PlotMut16, WT10, WT11, WT12, WT9, PlotWT9, PlotWT10, PlotWT11, PlotWT12, Zic3Mut13, Zic3Mut14, Zic3Mut15, Zic3Mut16, Zic3WT10, Zic3WT11, Zic3WT12, Zic3WT9)
+
+rm(current_names, new_names, new_order, sample.id, sample.ids, sample.name, sample.type, UMAP_merged, UMAP_Mut,        UMAP_WT, Zic3Mut, Zic3WT)       
+
+# Do not remove WT, Mut, Zic3data.merged or UMAP.cols.13
+
+ls()
+```
+
+# 4. 3D UMAPs
+
+## Generate 3D embeddings
+
+Regenerate the 2D UMAP that you have previously used. You need to do
+this for plotly to work. Create a new object as you do this so that it
+doesn't alter anything in your original object
+
+```{r}
+Zic3data.merged.3d <- RunUMAP(Zic3data.merged,
+                            dims = 1:20,
+                            n.components = 3)
+
+```
+
+```{r}
+# Check UMAP embeddings were created by running the following:
+head(Zic3data.merged.3d[["umap"]]@cell.embeddings)
+
+```
+
+```{r}
+# Prepare a dataframe for cell plotting
+plot.data <- FetchData(object = Zic3data.merged.3d, vars = c("umap_1", "umap_2", "umap_3", "seurat_clusters"))
+
+# Make a column of row name identities (these will be your cell/barcode names)
+plot.data$label <- paste(rownames(plot.data))
+```
+
+### Figure 4B: merged 3D UMAP
+
+```{r}
+# Plot your data, in this example my Seurat object had 21 clusters (0-20)
+UMAP_3D_merged <- plot_ly(data = plot.data, 
+                x = ~umap_1, y = ~umap_2, z = ~umap_3, 
+                color = ~seurat_clusters, 
+                colors = UMAP.cols.13,
+                type = "scatter3d", 
+                mode = "markers", 
+                marker = list(size = 3, width=1), # controls size of points
+                text=~label, # This is that extra column we made earlier for which we will use for cell ID
+                hoverinfo="text") # When you visualize your plotly object, hovering your mouse pointer over a point shows cell names
+
+UMAP_3D_merged
+```
+
+```{r}
+WT.3d <- RunUMAP(WT,
+                dims = 1:20,
+                n.components = 3)
+
+Mut.3d <- RunUMAP(Mut,
+                dims = 1:20,
+                n.components = 3)
+```
+
+```{r}
+# Prepare a dataframe for cell plotting
+plot.dataWT <- FetchData(object = WT.3d, vars = c("umap_1", "umap_2", "umap_3", "seurat_clusters"))
+plot.dataMut <- FetchData(object = Mut.3d, vars = c("umap_1", "umap_2", "umap_3", "seurat_clusters"))
+
+# Make a column of row name identities (these will be your cell/barcode names)
+plot.dataWT$label <- paste(rownames(plot.dataWT))
+plot.dataMut$label <- paste(rownames(plot.dataMut))
+```
+
+### Figure 4B: WT and Mut 3D UMAPs
+
+```{r}
+# Plot your data, in this example my Seurat object had 21 clusters (0-20)
+UMAP_3D_WT <- plot_ly(data = plot.dataWT, 
+              x = ~umap_1, y = ~umap_2, z = ~umap_3, 
+              color = ~seurat_clusters, 
+              colors = UMAP.cols.13,
+              type = "scatter3d", 
+              mode = "markers", 
+              marker = list(size = 3, width=1), # controls size of points
+              text=~label, #This is that extra column we made earlier for which we will use for cell ID
+              hoverinfo="text") |> #When you visualize your plotly object, hovering your mouse pointer over a point shows cell names
+        layout(title = list(text = "WT UMAP"),
+        scene = list(
+      xaxis = list(range = c(max(plot.dataWT$umap_1), min(plot.dataWT$umap_1))),  # Flipping x-axis
+      yaxis = list(range = c(max(plot.dataWT$umap_2), min(plot.dataWT$umap_2))),  # Flipping y-axis
+      zaxis = list(range = c(max(plot.dataWT$umap_3), min(plot.dataWT$umap_3)))   # Flipping z-axis
+    )
+        )
+
+# Plot your data, in this example my Seurat object had 21 clusters (0-20)
+UMAP_3D_Mut <- plot_ly(data = plot.dataMut, 
+              x = ~umap_1, y = ~umap_2, z = ~umap_3, 
+              color = ~seurat_clusters, 
+              colors = UMAP.cols.13,
+              type = "scatter3d", 
+              mode = "markers", 
+              marker = list(size = 3, width=1), # controls size of points
+              text=~label, #This is that extra column we made earlier for which we will use for cell ID
+              hoverinfo="text") |> 
+        layout(title = list(text = "Mut UMAP"),
+               scene = list(
+      xaxis = list(range = c(max(plot.dataMut$umap_1), min(plot.dataMut$umap_1))),  # Flipping x-axis
+      yaxis = list(range = c(max(plot.dataMut$umap_2), min(plot.dataMut$umap_2))),  # Flipping y-axis
+      zaxis = list(range = c(max(plot.dataMut$umap_3), min(plot.dataMut$umap_3)))   # Flipping z-axis
+    )
+        )
+
+UMAP_3D_WT
+UMAP_3D_Mut
+```
+
+```{r}
+# Save the rotating UMAP plot to an HTML file
+saveWidget(UMAP_3D_merged, "3D_UMAP_merged.html")
+saveWidget(UMAP_3D_WT, "3D_UMAP_WT.html")
+saveWidget(UMAP_3D_Mut, "3D_UMAP_Mut.html")
+```
+
+##Cleanup
+
+Use ls() to get a list of loaded objects, dataframes etc
+
+**Keep Zic3data.merged, WT and Mut loaded for downstream analysis.**
+
+```{r}
+#remove objects, dataframes and vectors that won't be needed again.
+rm(Zic3data.merged.3d, plot.data, WT.3d, Mut.3d, plot.dataWT, plot.dataMut, UMAP_3D_merged, UMAP_3D_Mut, UMAP_3D_WT)
+ls()
+```
+
+# 5. Differential Cluster Abundance
+
+##Cell counts \### Total numbers of cells
+
+```{r}
+#the number of columns (second number) is the number of cells in each data subset
+dim(Zic3data.merged)
+dim(WT)
+dim(Mut)
+```
+
+### Number of cells per sample per cluster
+
+```{r}
+# Get number of cells per cluster and per sample of origin
+Cluster_counts <- table(Zic3data.merged@meta.data$seurat_clusters, Zic3data.merged@meta.data$orig.ident)
+
+#change order of columns
+col_order <- colnames(Cluster_counts)
+col_order <- c("Sample9.WT", "Sample10.WT", "Sample11.WT", "Sample12.WT", "Sample13.Mut", "Sample14.Mut", "Sample15.Mut", "Sample16.Mut")
+Cluster_counts <- Cluster_counts[, col_order]
+
+#show table
+Cluster_counts
+```
+
+```{r}
+
+#save as csv
+write.csv(Cluster_counts, file="Outputs/All8_cluster_counts.csv")
+```
+
+```{r}
+# Set up genotype labels for plots
+genotype_names <- list(
+  "WT" = expression(bolditalic("Zic3")^bolditalic("+/+")),
+  "Mut" = expression(bolditalic("Zic3")^bolditalic("Ka/Y"))
+)
+
+genotype_labeller <- function(variable,value){return(genotype_names[value])}
+```
+
+**IMPORTANT: open All8_cluster_counts.csv file and add "Cell_Type" to
+the A1 cell for downstream analysis to work.**
+
+```{r read_cell_counts}
+dataset <- read.csv("Outputs/All8_cluster_counts.csv")
+```
+
+Correct for cell size. Smaller or larger cells may not be equally
+captured across all samples.
+
+Divide the total \# cells per embryo by the average total \# cells for
+all 8 embryos to give a size factor. Then divide each cell_type count
+(i.e. the number of cells in each cluster per embryo) by this size
+factor to normalize for cell size differences.
+
+```{r}
+# correct for size factors:
+
+# get total cell counts and divide by global mean
+totals <- colSums(select_if(dataset, is.numeric)) 
+
+size_factors <- totals / mean(totals)
+
+# Replace the data with the normalised data
+dataset[2:9] <- dataset[2:9]/size_factors[col(dataset[2:9])]
+```
+
+```{r}
+#convert multiple columns containing cell counts across samples into two columns of sample and frequency
+#I.e., wide --> long format
+cell_counts_long <- dataset %>% melt(id.vars="Cell_Type", variable.name="Sample", value.name = "Frequency")
+
+cell_counts_long
+
+#if error that Cell_Type is not found, see above **Important note
+```
+
+#### Figure 4C and Supp. Figure 5C: Cell Proportions
+
+```{r, fig.width=7, fig.height =3}
+##only needed if plotting as horiztonal instead of vertical
+# Define the order of levels for the Sample column
+sample_order <- c("Sample9.WT", "Sample10.WT", "Sample11.WT", "Sample12.WT", "Sample13.Mut", "Sample14.Mut", "Sample15.Mut", "Sample16.Mut", "WT_sum", "Mut_sum")
+
+# Plots proportion of cell-types across all samples and merges.
+Proportion_barchart <- ggplot(cell_counts_long, 
+                       aes(x=Sample, y= Frequency, fill=Cell_Type))+
+                       theme_minimal(base_size = 10) +
+                        geom_col(position="fill", width=0.8) + #make it a full length bar rather than a stacked bar
+                        xlab("Sample") +
+                        ylab("Proportion") +
+                        theme(legend.title = element_blank(), 
+                              axis.text=element_text(size=5, angle=0, face="plain"), #sample names and freq numbers
+                              text = element_text(size=5, face="bold"))+ #axis labels
+                        scale_fill_manual(values = UMAP.cols.13) +
+                        coord_flip() + #flips the graph from vertical to horiztonal
+                        scale_x_discrete(limits = rev(levels(cell_counts_long$Sample))) #reverses the order of the samples on the x axis so that sample 9 comes first and Mut comes last
+
+plot(Proportion_barchart)
+ggsave("Outputs/CellProportions_barchart.tiff", plot = Proportion_barchart, dpi=300, height = 6, width = 14, units = "in")
+```
+
+## Statistics: Wt vs Mut
+
+### Statistic 1: Fisher Test for All cell types
+
+Shows an association between genotype and cell-type
+
+```{r}
+# WT vs Mut
+# Gets individual counts for each cell type per sample (removing the merged data). Adds a WT or Mut label to the sample
+cell_counts_long_v2 <- cell_counts_long %>% 
+  filter(Sample != "WT_Sum" & Sample != "Mut_Sum") %>%
+  mutate(Genotype = if_else(str_detect(Sample, ".WT"), "WT", "Mut"))
+
+# creates a table of counts by genotype and cell Type - adds all samples together as counts
+cont_table_xtabs <- xtabs(Frequency ~ Cell_Type + Genotype, data = cell_counts_long_v2)
+
+#performs a Fisher test for the table - simulate pvalue is to reduce computational resources required. See if the code runs if you remove it. 
+fisher_result <- fisher.test(cont_table_xtabs, simulate.p.value=TRUE)
+fisher_result
+
+
+# save result
+# Extract p-value and odds ratio (if available)
+p_value <- fisher_result$p.value
+
+# For a 2x2 table, the odds ratio might be available in `estimate`
+# If it's not available, it will return NULL, so we safely check for it
+odds_ratio <- ifelse(is.null(fisher_result$estimate), NA, fisher_result$estimate)
+
+# Put the results in a data frame
+results_df <- data.frame(P_Value = p_value, Odds_Ratio = odds_ratio)
+write.csv(results_df, 'Outputs/fishers_test_WTvsMut.csv')
+```
+
+####Plot: All WT and Mut samples merged
+
+```{r echo=FALSE, fig.width=10, fig.height=7}
+# converts the data into proportions of cells type across the sums of wild-type and mutants
+prop_df <- as.data.frame(prop.table(cont_table_xtabs, margin = 2))
+
+# changes levels to be in the right order
+prop_df$Genotype <- factor(prop_df$Genotype, levels =c("WT", "Mut"))
+
+ggplot(prop_df, aes(x = Cell_Type, y = Freq, fill = Genotype)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  xlab("Cell Type") +
+  scale_fill_manual(values = c("#aaaaaa", "#cccccc"), labels = unlist(genotype_names))+
+  ylab("Proportion") +
+  ggtitle("Proportions of Mut and WT Groups by Cell Type") +
+  theme(
+        text = element_text(size=10))
+```
+
+#### Plot: Boxplot of frequencies (i.e. proportion of cell types) for individual samples
+
+```{r  fig.width=10, fig.height=7}
+#creates a table as above but separates them into individual samples
+cont_table_xtabs_v2 <- xtabs(Frequency ~ Cell_Type + Genotype + Sample, data = cell_counts_long_v2)
+
+
+# creates of cell types per sample, removes the merged wt and Mut data. It creates 
+prop_df_v3 <- as.data.frame(prop.table(cont_table_xtabs_v2, margin = 2))%>% 
+  filter(Sample != ("Mut_Sum") & Sample != ("WT_Sum"), Freq != 0)
+
+prop_df_v3$Genotype <- factor(prop_df_v3$Genotype, levels =c("WT", "Mut"))
+
+ggplot(prop_df_v3, aes(x=Cell_Type, y=Freq, fill=Genotype))+
+  geom_boxplot()+
+  scale_fill_manual(values = c("#aaaaaa", "#cccccc"), labels = unlist(genotype_names))+
+  ylab("Proportion Per Individual Embryo") +
+  ggtitle("Proportions of Individual Embryos Grouped by Cell Type")+
+  theme(
+        text = element_text(size=10))
+```
+
+### Statistic 2: Comparision of proportions between different cell types:
+
+The logic is that the cell counts for each cell type is compared to the
+frequency of all other cell types (i.e, Total cells - cell_type Cells).
+
+```{r}
+# WT vs Mut cell populations
+total_cells <- colSums(cont_table_xtabs)
+
+# for loop to analyse each cluster
+row_tests <- apply(cont_table_xtabs, 1, function(row) {
+  # append total-cells-minus row
+  row_ref <- total_cells-row # perform fisher test
+  row_fisher <- fisher.test(matrix(rbind(row, row_ref), ncol = 2))
+  return(row_fisher$p.value)
+})
+
+# apply Benjamini-Hochberg FDR correction
+row_tests_bh <- p.adjust(row_tests, method = "BH")
+
+# create data frame with resultsc before and after FDR correction
+results <- data.frame(p_value = row_tests, p_value_BH = row_tests_bh)
+
+results
+
+# save results
+write.csv(results, 'Outputs/fishers_test_clusters.csv')
+```
+
+##Cleanup
+
+```{r}
+rm(cell_counts_long, cell_counts_long_v2,  odds_ratio, Cluster_counts, col_order, cont_table_xtabs, cont_table_xtabs_v2,  fisher_result, results_df, sample_order, p_value, dataset, genotype_labeller, genotype_names, prop_df, prop_df_v3, results, row_tests, row_tests_bh, total_cells, Proportion_barchart, size_factors, totals)
+ls()
+```
+
+Use (.packages()) or sessionInfo() to get a list of all loaded/active
+packages. sessionInfo() will also list all installed packages.
+
+**Keep ggpot2, readr, tidyr, dplyr, Seurat and SeuratObject installed
+for downstream analysis + base R pacMutges.**
+
+```{r}
+#Unload use-installed packages that are no longer needed
+detach("package:plotly")
+detach("package:htmlwidgets")
+(.packages())
+```
