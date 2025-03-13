@@ -7,7 +7,10 @@ This repository contains code for reproducibility of the single-cell RNA sequenc
 Please cite this paper if you use this data or code. 
 
 ## Requirements
-- Seurat v4.3.0
+- R version 4.2.2, 
+- "Matrix" package version "1.5-1", 
+- "SeuratObject" package version "4.1.3", 
+- "Seurat" package version "4.3.0"
   
 ## Data Availability
 Raw counts matrices are available on GEO with accession code XXXX
@@ -31,6 +34,9 @@ Extended data:
 - DEG list (DEseq2)
 
 ## Code notes
+
+Prior to running this code in R, the scRNA-seq object 
+
 Throughout these markdowns, 'WT' refers to all 4 *Zic3^+/+* embryos together and Mut refers to all four *Zic3^Ka/Y* embryos together.
 
 Merged data refers to all 8 embryos (WT and Mut) together. 
