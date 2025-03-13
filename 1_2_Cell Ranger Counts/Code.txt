@@ -1,0 +1,38 @@
+cellranger count --id=GEX_Kristen_9_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_9 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+cellranger count --id=GEX_Kristen_10_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_10 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+cellranger count --id=GEX_Kristen_11_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_11 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+cellranger count --id=GEX_Kristen_12_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_12 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+cellranger count --id=GEX_Kristen_13_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_13 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+cellranger count --id=GEX_Kristen_14_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_14 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+cellranger count --id=GEX_Kristen_15_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_15 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+cellranger count --id=GEX_Kristen_16_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_16 --transcriptome=./mm10_eGFP_ref_Di --include-introns false
+
+# Each sample is run using the default settings of cellranger count first. 
+# Determine the number of cells/barcodes with 100% confidence based on the "web_summary.html" report file it generates (some barcodes only correspond to droplets, not 'real' cells). 
+# Set the '--force-cells' parameter based on this confidence cell number and rerun each sample.
+
+
+cellranger count --id=GEX_Kristen_9_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_9 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=1468
+
+cellranger count --id=GEX_Kristen_10_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_10 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=988
+
+cellranger count --id=GEX_Kristen_11_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_11 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=1023
+
+cellranger count --id=GEX_Kristen_12_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_12 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=2413
+
+cellranger count --id=GEX_Kristen_13_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_13 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=1023
+
+cellranger count --id=GEX_Kristen_14_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_14 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=459
+
+cellranger count --id=GEX_Kristen_15_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_15 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=1253
+
+cellranger count --id=GEX_Kristen_16_Di2023 --fastqs=./HNH5HDSX5 --sample=Kristen_GEX_16 --transcriptome=./mm10_eGFP_ref_Di --include-introns false --force-cells=284
+
+
