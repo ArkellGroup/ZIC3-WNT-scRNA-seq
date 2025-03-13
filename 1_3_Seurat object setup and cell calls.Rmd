@@ -1,0 +1,673 @@
+---
+title: "1_1_Seurat object setup"
+output:
+  pdf_document:
+header-includes:
+     - \pagenumbering{gobble}
+     - \usepackage{etoolbox}
+     - \preto{\section}{\ifhmode\unskip\fi}
+     - \usepackage{titling}
+     - \pretitle{\begin{center}\LARGE\color{blue}\textbf}
+     - \posttitle{\par\end{center}\vskip 0.5em}
+     - \usepackage{sectsty}
+     - \sectionfont{\color{orange}\fontsize{18}{20}\selectfont}
+     - \subsectionfont{\color{purple}\fontsize{14}{16}\selectfont}
+date: "`r Sys.Date()`"
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# R version 4.2.2
+if(!require(Matrix))remotes::install_version("Matrix", version = "1.5-1")
+if(!require(SeuratObject))remotes::install_version("SeuratObject", version = "4.1.3")
+if(!require(Seurat))remotes::install_version("Seurat", version = "4.3.0")
+if(!require(clustree))BiocManager::install("clustree")
+if(!require(patchwork))install.packages("patchwork")
+if(!require(knitr))install.packages("knitr")
+if(!require(dplyr))install.packages("dplyr")
+if(!require(ggplot2))BiocManager::install("ggplot2")
+if(!require(writexl))install.packages("writexl")
+if(!require(readxl))install.packages("readxl")
+#for first time run# install.packages("tinytex")
+#for first time run# tinytex::install_tinytex()
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+four.good.colors <- c("#E84D8A", "#FEB326", "#64C5EB", "#7F58AF")
+eight.good.colors <- c("#1F77B4","#FF7F0E","#2CA02C","#D62728","#9467BD","#8C564B","#BCBD22","#17BECF")
+ten.good.colors <- c("#1F77B4","#FF7F0E","#2CA02C","#D62728","#9467BD",
+                     "#8C564B","#E377C2","#7F7F7F","#BCBD22","#17BECF")
+eleven.good.colors <- c("#1F77B4","#FF7F0E","#2CA02C","#D62728","#9467BD",
+                     "#8C564B","#E377C2","#BCBD22","#17BECF","#440154","#FDE725")
+heatmap.five.colors <- c("#440154","#3B528B","#21908C","#5DC863","#FDE725")
+```
+
+# Sample9-16 filter threshold setting: 
+## Include cells where at least this many features(i.e. genes) are detected: 50
+## Include features(genes) detected in at least this many cells: 6
+## nFeature_RNA = gene number < 11000 & > 3000
+## nCount_RNA = RNA number < 150000
+### High nFeature_RNA might mean doublet cells; low nFeature_RNA might mean thie cell might be bad or not seq enough.
+## percent.mt = the ratio of mitochondria filtered 10%
+### High ratio of mitochondria RNA means the cell is not active enough.
+\pagebreak
+```{r echo=FALSE, fig.height=3.8, fig.width=6, message=FALSE, warning=FALSE, results='asis'}
+sample.id <- 9:16
+sample.name <- c(rep('black', (sample.id[1]-1)), paste0("Sample", 9:12, ".WT"), paste0("Sample", 13:16, ".Mut"))
+colors <- c(rep('black', (sample.id[1]-1)), eight.good.colors)
+nCount <- c()
+nFeature <- c()
+percent <- c()
+Replicate <- c()
+
+for (i in sample.id) {
+X10 <- Read10X(data.dir = paste0("./GEX_Kristen_", 
+  i, "_Di2023/outs/filtered_feature_bc_matrix"))
+raw <- CreateSeuratObject(counts = X10, 
+    project = sample.name[i], min.features = 50, min.cells = 6)
+
+raw[["percent.mt"]] <- PercentageFeatureSet(raw, pattern = "^mt-")
+
+VlnPlot <- VlnPlot(raw, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol =3, cols = colors[i]) + 
+  labs(subtitle = '←Before filtering') + theme(plot.subtitle = element_text(size = 6))
+print(VlnPlot)
+
+FeatureScatter1 <- FeatureScatter(raw, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", 
+               cols = colors[i]) + theme(legend.position = "none") + ggtitle(paste0(sample.name[i], '-before'))
+
+raw <- subset(raw, subset = nFeature_RNA > 3000 & nFeature_RNA < 11000 & nCount_RNA < 150000 & percent.mt < 10)
+
+VlnPlot2 <- VlnPlot(raw, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol =3, 
+                    cols = colors[i]) + labs(subtitle = '←After filtering') + 
+  theme(plot.subtitle = element_text(size = 6))
+print(VlnPlot2)
+
+cat("  \n")
+cat(paste0("The cell numbers before filterring of", sample.name[i], " : ", ncol(X10)))
+cat("  \n")
+
+cat(paste0("The final cell number after filtering of", sample.name[i], " : ", ncol(as.data.frame(raw[["RNA"]]@counts))))    
+cat("  \n")
+
+cat("\n\n\\pagebreak\n")
+FeatureScatter2 <- FeatureScatter(raw, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", 
+               cols = colors[i]) + theme(legend.position = "none") + ggtitle(paste0(sample.name[i], '-after'))
+print(FeatureScatter1 + FeatureScatter2)
+
+nCount_RNA <- raw@meta.data$nCount_RNA
+nFeature_RNA <- raw@meta.data$nFeature_RNA
+percent.mt <- raw@meta.data$percent.mt
+nCount <- c(nCount, nCount_RNA)
+nFeature <- c(nFeature, nFeature_RNA)
+percent <- c(percent, percent.mt)
+Replicate <- c(Replicate, rep(sample.name[i], length(nCount_RNA)))
+
+assign(paste0(sample.name[i], '.raw'), raw)
+cat("\n\n\\pagebreak\n")}
+```
+
+\pagebreak
+# Reproducibility of nCount, nFeature, percent.mt
+```{r echo=FALSE, fig.height=4.5, fig.width=6, message=FALSE, warning=FALSE, results='asis'}
+Replicate <- factor(Replicate, levels = c(paste0("Sample", 9:12, ".WT"), paste0("Sample", 13:16, ".Mut")), ordered = TRUE)
+meta.data.merge <- data.frame(nCount, nFeature, percent, Replicate)
+
+ggplot(meta.data.merge,aes(Replicate, nCount))+
+  ggdist::stat_halfeye(mapping = aes(fill=Replicate),width = 0.6, .width = 0, 
+  justification = -0.4, point_colour = NA,alpha=1) + 
+  geom_jitter(mapping = aes(color=Replicate),width = 0.15, alpha = 0.4,size=0.05)+
+  geom_boxplot(width = 0.15, outlier.shape = NA,fill=NA,size=0.5)+
+  labs(title = "nCount_RNA")+scale_y_continuous(expand = c(0.02,0))+
+  scale_x_discrete(expand = c(0,0.3))+scale_fill_manual(values = colors[9:16])+
+  scale_color_manual(values = colors[9:16]) +theme_classic()+
+  theme(axis.text.x.bottom = element_text(angle = 45,hjust = 1,size = 10,color = "black"),
+    axis.text.y.left = element_text(size = 12,color = "black"),axis.title.y.left = element_blank(),
+    axis.title.x.bottom = element_blank(),axis.ticks.length=unit(0.2, "cm"),
+    plot.title = element_text(size = 18,hjust = 0.5),legend.position = "none")
+cat("\n\n\\pagebreak\n")
+
+ggplot(meta.data.merge,aes(Replicate, nFeature))+
+  ggdist::stat_halfeye(mapping = aes(fill=Replicate),width = 0.6, .width = 0, 
+  justification = -0.4, point_colour = NA,alpha=1) + 
+  geom_jitter(mapping = aes(color=Replicate),width = 0.15, alpha = 0.4,size=0.05)+
+  geom_boxplot(width = 0.15, outlier.shape = NA,fill=NA,size=0.5)+
+  labs(title = "nFeature_RNA")+scale_y_continuous(expand = c(0.02,0))+
+  scale_x_discrete(expand = c(0,0.3))+scale_fill_manual(values = colors[9:16])+
+  scale_color_manual(values = colors[9:16]) +theme_classic()+
+  theme(axis.text.x.bottom = element_text(angle = 45,hjust = 1,size = 10,color = "black"),
+    axis.text.y.left = element_text(size = 12,color = "black"),axis.title.y.left = element_blank(),
+    axis.title.x.bottom = element_blank(),axis.ticks.length=unit(0.2, "cm"),
+    plot.title = element_text(size = 18,hjust = 0.5),legend.position = "none")
+cat("\n\n\\pagebreak\n")
+
+ggplot(meta.data.merge,aes(Replicate, percent))+
+  ggdist::stat_halfeye(mapping = aes(fill=Replicate),width = 0.6, .width = 0, 
+  justification = -0.4, point_colour = NA,alpha=1) + 
+  geom_jitter(mapping = aes(color=Replicate),width = 0.15, alpha = 0.4,size=0.05)+
+  geom_boxplot(width = 0.15, outlier.shape = NA,fill=NA,size=0.5)+
+  labs(title = "nFeature_RNA")+scale_y_continuous(expand = c(0.02,0))+
+  scale_x_discrete(expand = c(0,0.3))+scale_fill_manual(values = colors[9:16])+
+  scale_color_manual(values = colors[9:16]) +theme_classic()+
+  theme(axis.text.x.bottom = element_text(angle = 45,hjust = 1,size = 10,color = "black"),
+    axis.text.y.left = element_text(size = 12,color = "black"),axis.title.y.left = element_blank(),
+    axis.title.x.bottom = element_blank(),axis.ticks.length=unit(0.2, "cm"),
+    plot.title = element_text(size = 18,hjust = 0.5),legend.position = "none")
+```
+
+\pagebreak
+```{r message=FALSE, warning=FALSE, include=FALSE}
+for (i in sample.id) {
+name <- paste0(sample.name[i], '.raw')
+raw <- get(name)
+raw <- NormalizeData(raw, normalization.method = "LogNormalize", scale.factor = 10000)
+#normalizes the feature expression measurements for each cell by the total expression
+raw <- FindVariableFeatures(raw, selection.method = "vst", nfeatures = 2000)  #2000 HVGs
+assign(paste0(sample.name[i], '.raw'), raw)
+}
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+WT.anchors <- FindIntegrationAnchors(object.list = list(Sample9.WT.raw, 
+              Sample10.WT.raw,Sample11.WT.raw,Sample12.WT.raw), dims = 1:20)
+WT.integrated <- IntegrateData(anchorset = WT.anchors, dims = 1:20)
+saveRDS(WT.integrated,"./WT.integrated.22.03.2024.rds")
+# treat all WT as replicates.
+
+merge.anchors <- FindIntegrationAnchors(object.list = list(Sample9.WT.raw, 
+              Sample10.WT.raw,Sample11.WT.raw,Sample12.WT.raw,Sample13.Mut.raw,
+              Sample14.Mut.raw,Sample15.Mut.raw,Sample16.Mut.raw), dims = 1:20)
+merge.integrated <- IntegrateData(anchorset = merge.anchors, dims = 1:20)
+saveRDS(merge.integrated,"./merge.integrated.22.03.2024.rds")
+# deeply normalize all the eight samples
+```
+
+# Merge all and treat all eight WT / Mut as replicates
+## did deeply normalize WT and Mut, as well as seq depth correct
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# merge.integrated <- readRDS("./merge.integrated.26.06.2023.rds")
+# WT.integrated <- readRDS("./WT.integrated.22.03.2024.rds")
+
+# Find 2000 highly variable genes (HVGs)
+ALL.merge.raw <- FindVariableFeatures(merge.integrated, selection.method = "vst", nfeatures = 2000)  #2000 HVGs
+WT.merge.raw <- FindVariableFeatures(WT.integrated, selection.method = "vst", nfeatures = 2000)  #2000 HVGs
+
+## gene expression normalization
+ALL.merge.raw <- ScaleData(ALL.merge.raw, features = rownames(ALL.merge.raw))
+WT.merge.raw <- ScaleData(WT.merge.raw, features = rownames(WT.merge.raw))
+```
+
+```{r echo=FALSE, fig.height=3.8, fig.width=6, message=FALSE, warning=FALSE}
+# Show the PCA results of the 2000 HVGs
+## PC1 as an example
+ALL.merge.raw <- RunPCA(ALL.merge.raw, features = rownames(ALL.merge.raw))    
+WT.merge.raw <- RunPCA(WT.merge.raw, features = rownames(WT.merge.raw))   
+# print(ALL.merge.raw[["pca"]], dims = 1:5, nfeatures = 5)    #PCA results 
+# VizDimLoadings(ALL.merge.raw, dims = 1:2, reduction = "pca") 
+
+Idents(ALL.merge.raw) <- factor(Idents(ALL.merge.raw), levels = levels(Replicate))   # reorder Seurat Idents levels.
+Idents(WT.merge.raw) <- factor(Idents(WT.merge.raw), levels = levels(Replicate)[1:4])
+
+DimPlot(ALL.merge.raw, reduction = "pca", cols = eight.good.colors, 
+     label.size = 0.3) + theme(plot.title = element_text(size = 12)) + 
+    theme(legend.position = "bottom", legend.text = element_text(size = 5)) + 
+  labs(title = "Normalisation all 8 samples together", subtitle = 'deeply normalize WT & Mut + depth correct')
+DimPlot(WT.merge.raw, reduction = "pca", cols = eight.good.colors[1:4], 
+     label.size = 0.3) + theme(plot.title = element_text(size = 12)) + 
+    theme(legend.position = "bottom", legend.text = element_text(size = 5)) + 
+  labs(title = "Normalisation all 4 WT samples", subtitle = 'deeply normalize WT & Mut + depth correct')
+# DimHeatmap(ALL.merge.raw, dims = 1:15, cells = 500, balanced = TRUE) 
+```
+
+```{r fig.height=3.5, fig.width=5, message=FALSE, warning=FALSE, include=FALSE, results='asis'}
+# Decide the suitable PC we would use 
+## This would help decide how much PC we need. Here we selected the top 12 PC. 
+ALL.merge.raw <- JackStraw(ALL.merge.raw, num.replicate = 100,  dims = 20) 
+ALL.merge <- ScoreJackStraw(ALL.merge.raw, dims = 1:20) 
+# JackStrawPlot(ALL.merge, dims = 1:20) 
+
+WT.merge.raw <- JackStraw(WT.merge.raw, num.replicate = 100,  dims = 20) 
+WT.merge <- ScoreJackStraw(WT.merge.raw, dims = 1:20) 
+# JackStrawPlot(ALL.merge, dims = 1:20)
+```
+
+```{r echo=FALSE, fig.height=3.5, fig.width=5, message=FALSE, warning=FALSE, results='asis'}
+ElbowPlot(ALL.merge) + labs(title = "Normalisation all 8 samples together")
+cat("  \n")
+ElbowPlot(WT.merge) + labs(title = "Normalisation 4 WT samples")
+```
+
+\pagebreak
+# Deciding the number of clusters for all eight merge
+## decided the dim region 20, which is the most stable
+### in dim 20, select resolution 0.34
+```{r message=FALSE, warning=FALSE, include=FALSE}
+para = c(0.02)
+for (x in 2:18) {
+  y = 0.02 * x
+  para <- c(para, y)
+}
+ALL.merge <- ScoreJackStraw(ALL.merge.raw, dims = 1:20) 
+ALL.merge <- FindNeighbors(ALL.merge, dims = 1:20)  
+ALL.merge <- FindClusters(ALL.merge, resolution = para)
+```
+```{r echo=FALSE, fig.height=8, fig.width=7, message=FALSE, warning=FALSE}
+clustree(ALL.merge)  #decided the dim region 20, which is the most stable. in 20, select resolution 0.34
+```
+
+\pagebreak
+# Deciding the number of clusters for WT four merge
+## decided the dim region 18, which is the most stable
+### in dim 18, select resolution 0.18
+```{r message=FALSE, warning=FALSE, include=FALSE}
+para = c(0.02)
+for (x in 2:14) {
+  y = 0.02 * x
+  para <- c(para, y)
+}
+
+WT.merge <- FindNeighbors(WT.merge, dims = 1:18)  
+WT.merge <- FindClusters(WT.merge, resolution = para)
+```
+```{r echo=FALSE, fig.height=8, fig.width=7, message=FALSE, warning=FALSE}
+clustree(WT.merge)  #decided the dim region 18, which is the most stable. in 18, select resolution 0.18
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+ALL.merge <- FindClusters(ALL.merge, resolution = 0.34)  ###basing on the above clustree result
+ALL.merge <- RunTSNE(ALL.merge, dims = 1:20) 
+ALL.merge <- RunUMAP(ALL.merge, dims = 1:20)
+
+WT.merge <- FindClusters(WT.merge, resolution = 0.18)  ###basing on the above clustree result
+WT.merge <- RunTSNE(WT.merge, dims = 1:18) 
+WT.merge <- RunUMAP(WT.merge, dims = 1:18)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+saveRDS(ALL.merge,"./ALL.merge.22.03.2024.rds")
+saveRDS(WT.merge,"./R analysis/WT.merge.22.03.2024.rds")
+```
+
+# Nine clusters in four merged WT samples
+## with unsplit cluster DE/Node/APS
+```{r echo=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, results='asis'}
+# WT.merge <- readRDS("./WT.merge.26.06.2023.rds")
+# ALL.merge <- readRDS("./ALL.merge.26.06.2023.rds")
+WT.merge <- RenameIdents(object = WT.merge, '0' = 'NasMeso', '1' = 'Epi', '2' = 'PS',
+         '3' = 'ExVE', '4' = 'ExE Meso', '5' = 'EmVE', '6' = 'DE/Node/APS', '7' = 'ExE Ectoderm',
+         '8' = 'PGCs')
+
+DimPlot(WT.merge, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 3.5,
+        cols = eleven.good.colors) + 
+  labs(title = "WT - clusters", subtitle = 'merge for WT samples')
+```
+\pagebreak
+```{r fig.height=7, fig.width=8, message=FALSE, warning=FALSE, include=FALSE}
+DE.Node.APS.raw <- subset(x = WT.merge, idents = c("DE/Node/APS"), invert=F)
+DE.Node.APS.raw <- JackStraw(DE.Node.APS.raw, num.replicate = 100) 
+DE.Node.APS <- ScoreJackStraw(DE.Node.APS.raw, dims = 1:20) 
+# ElbowPlot(DE.Node.APS)
+
+para = c(0.02)
+for (x in 2:14) {
+  y = 0.02 * x
+  para <- c(para, y)
+}
+DE.Node.APS <- FindNeighbors(DE.Node.APS, dims = 1:12)  
+DE.Node.APS <- FindClusters(DE.Node.APS, resolution = para)
+# clustree(DE.Node.APS)  
+DE.Node.APS <- FindClusters(DE.Node.APS, resolution = 0.16) 
+DE.Node.APS <- RenameIdents(object = DE.Node.APS, '0' = 'DE', '1' = 'Node', '2' = 'APS')
+DE.Node.APS <- RunTSNE(DE.Node.APS, dims = 1:12) 
+DE.Node.APS <- RunUMAP(DE.Node.APS, dims = 1:12)
+```
+
+# Three split clusters in four merged WT samples
+## in the cluster DE/Node/APS
+```{r echo=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, results='asis'}
+DimPlot(DE.Node.APS, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 5,
+        cols = c(eleven.good.colors[which(levels(Idents(WT.merge)) == "DE/Node/APS")],
+        eleven.good.colors[length(eleven.good.colors)-1], eleven.good.colors[length(eleven.good.colors)])) + 
+  labs(title = "WT - clusters", subtitle = 'DE.Node.APS split clusters')
+```
+
+```{r fig.height=7, fig.width=8, message=FALSE, warning=FALSE, include=FALSE}
+matches <- grep("TRUE", levels(Idents(WT.merge)) != "DE/Node/APS")
+other.clusters.name <- c()
+for (i in matches) {
+  clusters.name <- levels(Idents(WT.merge))[i]
+  other.clusters.name <- c(other.clusters.name, clusters.name)
+}
+other.clusters <- subset(x = WT.merge, idents = other.clusters.name, invert=F)
+
+WT.merge.anno <- merge(other.clusters, DE.Node.APS)
+WT.merge.anno@graphs <- WT.merge@graphs
+WT.merge.anno@reductions <- WT.merge@reductions
+WT.merge.anno@commands <- WT.merge@commands
+WT.merge.anno@tools <- WT.merge@tools
+WT.merge.anno@meta.data <- WT.merge@meta.data
+WT.merge.anno@assays <- WT.merge@assays
+```
+
+# Eleven clusters in four merged WT samples
+## with split cluster DE/Node/APS
+```{r echo=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, results='asis'}
+WT.colors <- eleven.good.colors 
+
+names(WT.colors) <- c(levels(Idents(WT.merge))[1:(which(levels(Idents(WT.merge)) == "DE/Node/APS")-1)], levels(Idents(DE.Node.APS))[1], levels(Idents(WT.merge))[(which(levels(Idents(WT.merge)) == "DE/Node/APS")+1):length(levels(Idents(WT.merge)))], levels(Idents(DE.Node.APS))[2:3])
+
+DimPlot(WT.merge.anno, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 3.5,
+        cols = WT.colors) + 
+  labs(title = "WT - clusters", subtitle = 'in four merged WT samples')
+
+saveRDS(WT.merge.anno,"./WT.merge.anno.22.03.2024.rds")
+```
+
+\pagebreak
+# Eleven clusters in all 8 samples merged together
+## WT + Mut
+```{r echo=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, results='asis'}
+ALL.merge <- RenameIdents(object = ALL.merge, '0' = 'Epi', '1' = 'NasMes', '2' = 'PS', '3' = 'ExVE', '4' = 'ExE Mes', '5' = 'DE', '6' = 'Amnion/Chorion', '7' = 'ExE Ecto', '8' = 'EmVE', '9' = "Blood prog", "10" = "Node")
+
+ALL.colors <- eleven.good.colors 
+names(ALL.colors) <- levels(Idents(ALL.merge))
+
+DimPlot(ALL.merge, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 3.5,
+        cols = ALL.colors) + 
+  labs(title = "All - clusters", subtitle = 'merge all WT + Mut eight samples')
+```
+
+\pagebreak
+## with split DE & Node clusters from 2 to 3
+## with split ExE Mes cluster from 1 to 2
+```{r fig.height=7, fig.width=8, message=FALSE, warning=FALSE, include=FALSE}
+DE.Node.raw <- subset(x = ALL.merge, idents = c("DE", 'Node'), invert=F)
+DE.Node.raw <- JackStraw(DE.Node.raw, num.replicate = 100) 
+DE.Node <- ScoreJackStraw(DE.Node.raw, dims = 1:20) 
+# ElbowPlot(DE.Node.APS)
+
+para = c(0.02)
+for (x in 2:14) {
+  y = 0.02 * x
+  para <- c(para, y)
+}
+DE.Node <- FindNeighbors(DE.Node, dims = 1:10)  
+DE.Node <- FindClusters(DE.Node, resolution = para)
+# clustree(DE.Node)  
+DE.Node <- FindClusters(DE.Node, resolution = 0.14) 
+DE.Node <- RenameIdents(object = DE.Node, '0' = 'Node', '1' = 'DE', '2' = 'APS')
+DE.Node <- RunTSNE(DE.Node, dims = 1:10) 
+DE.Node <- RunUMAP(DE.Node, dims = 1:10)
+
+### ExE Mes
+
+ExE.Mes.raw <- subset(x = ALL.merge, idents = c("ExE Mes"), invert=F)
+ExE.Mes.raw <- JackStraw(ExE.Mes.raw, num.replicate = 100) 
+ExE.Mes <- ScoreJackStraw(ExE.Mes.raw, dims = 1:20) 
+# ElbowPlot(ExE.Mes.APS)
+
+para = c(0.02)
+for (x in 2:14) {
+  y = 0.02 * x
+  para <- c(para, y)
+}
+ExE.Mes <- FindNeighbors(ExE.Mes, dims = 1:10)  
+ExE.Mes <- FindClusters(ExE.Mes, resolution = para)
+# clustree(ExE.Mes)  
+ExE.Mes <- FindClusters(ExE.Mes, resolution = 0.08) 
+ExE.Mes <- RenameIdents(object = ExE.Mes, '0' = 'ExE Mes', '1' = 'PGCs')
+ExE.Mes <- RunTSNE(ExE.Mes, dims = 1:10) 
+ExE.Mes <- RunUMAP(ExE.Mes, dims = 1:10)
+```
+
+```{r eval=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, include=FALSE, results='asis'}
+DimPlot(DE.Node, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 5) + 
+  labs(title = "All - clusters", subtitle = 'DE.Node split clusters')
+cat("  \n")
+DimPlot(ExE.Mes, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 5) + 
+  labs(title = "All - clusters", subtitle = 'ExE Mes split clusters')
+```
+
+```{r fig.height=7, fig.width=8, message=FALSE, warning=FALSE, include=FALSE}
+matches <- intersect(intersect(grep("TRUE", levels(Idents(ALL.merge)) != "DE"), 
+            grep("TRUE", levels(Idents(ALL.merge)) != "Node")), grep("TRUE", levels(Idents(ALL.merge)) != "ExE Mes"))
+
+other.clusters.name <- c()
+for (i in matches) {
+  clusters.name <- levels(Idents(ALL.merge))[i]
+  other.clusters.name <- c(other.clusters.name, clusters.name)
+}
+other.clusters <- subset(x = ALL.merge, idents = other.clusters.name, invert=F)
+
+ALL.merge.anno <- merge(other.clusters, c(ExE.Mes, DE.Node))
+ALL.merge.anno@graphs <- ALL.merge@graphs
+ALL.merge.anno@reductions <- ALL.merge@reductions
+ALL.merge.anno@commands <- ALL.merge@commands
+ALL.merge.anno@tools <- ALL.merge@tools
+ALL.merge.anno@meta.data <- ALL.merge@meta.data
+ALL.merge.anno@assays <- ALL.merge@assays
+```
+
+# 13 clusters in All 8 merged samples
+## with split cluster DE/Node/APS and EXE.Mes/PGC
+```{r echo=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, results='asis'}
+extra.colors <- c("#006400","#7F7F7F")
+names(extra.colors) <- c('PGCs','APS' )
+ALL.colors <- c(ALL.colors, extra.colors)
+saveRDS(ALL.colors,"./ALL.colors.22.03.2024.rds")
+
+ALL.merge.anno$seurat_clusters <- Idents(ALL.merge.anno)
+
+DimPlot(ALL.merge.anno, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 3.5, cols = ALL.colors) + 
+  labs(title = "All - clusters", subtitle = 'Final merge all WT + Mut eight samples')
+cat("\n\n\\pagebreak\n")
+
+saveRDS(ALL.merge.anno,"./ALL.merge.anno.22.03.2024.rds")
+# ALL.merge.anno <- readRDS("./ALL.merge.anno.22.03.2024.rds")
+```
+
+```{r echo=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, results='asis'}
+cat('# Cell number in each cluster')
+merge <- ALL.merge.anno
+
+cell.counts <- table(merge$seurat_clusters)
+cell.count.df <- data.frame(Cluster = names(cell.counts), 'Cell.Count' = as.numeric(cell.counts))
+kable(cell.count.df)
+cat("\n\n\\pagebreak\n")
+```
+
+# Biological replicates?
+```{r echo=FALSE, fig.height=6, fig.width=7, message=FALSE, warning=FALSE, results='asis'}
+Idents(ALL.merge.anno) <- ALL.merge.anno$orig.ident
+DimPlot(ALL.merge.anno, reduction = "umap", cols = eight.good.colors) + 
+  labs(title = "All eight WT + Mut samples") + ggplot2::theme(legend.position="top")
+cat("\n\n\\pagebreak\n")
+DimPlot(ALL.merge.anno, reduction = "umap", cols = c(rep(eight.good.colors[1],4), rep(eight.good.colors[2],4))) + 
+  labs(title = "Compare WT and Mut samples") + ggplot2::theme(legend.position="top")
+```
+
+\pagebreak
+```{r echo=FALSE, fig.height=6.5, fig.width=6.5, message=FALSE, warning=FALSE, results='asis'}
+for (i in sample.id) {
+paste0(sample.name[i])
+subset <- subset(x = ALL.merge.anno, idents = c(sample.name[i]), invert=F)
+assign(paste0(sample.name[i]), subset)}
+
+DimPlot(Sample9.WT, reduction = "umap", cols = eight.good.colors[1], pt.size = 0.0001) + ggplot2::theme(legend.position="top") +
+ (DimPlot(Sample10.WT, reduction = "umap", cols = eight.good.colors[2], pt.size = 0.0001) + ggplot2::theme(legend.position="top")) +
+ (DimPlot(Sample11.WT, reduction = "umap", cols = eight.good.colors[3], pt.size = 0.0001) + ggplot2::theme(legend.position="top")) +
+ (DimPlot(Sample12.WT, reduction = "umap", cols = eight.good.colors[4], pt.size = 0.0001) + ggplot2::theme(legend.position="top")) +
+ (DimPlot(Sample13.Mut, reduction = "umap", cols = eight.good.colors[5], pt.size = 0.0001) + ggplot2::theme(legend.position="top")) +
+ (DimPlot(Sample14.Mut, reduction = "umap", cols = eight.good.colors[6], pt.size = 0.0001) + ggplot2::theme(legend.position="top")) +
+ (DimPlot(Sample15.Mut, reduction = "umap", cols = eight.good.colors[7], pt.size = 0.0001) + ggplot2::theme(legend.position="top")) +
+ (DimPlot(Sample16.Mut, reduction = "umap", cols = eight.good.colors[8], pt.size = 0.0001) + ggplot2::theme(legend.position="top"))
+cat("\n\n\\pagebreak\n")
+
+nFeature_numbers <- c(Sample9.WT@meta.data[["nFeature_RNA"]],Sample10.WT@meta.data[["nFeature_RNA"]],
+                    Sample11.WT@meta.data[["nFeature_RNA"]],Sample12.WT@meta.data[["nFeature_RNA"]],
+                    Sample13.Mut@meta.data[["nFeature_RNA"]],Sample14.Mut@meta.data[["nFeature_RNA"]],
+                    Sample15.Mut@meta.data[["nFeature_RNA"]],Sample16.Mut@meta.data[["nFeature_RNA"]])
+numeric_vector <- as.numeric(nFeature_numbers)
+average_of_nFeature_RNA <- round(mean(numeric_vector))
+
+nCount_numbers <- c(Sample9.WT@meta.data[["nCount_RNA"]],Sample10.WT@meta.data[["nCount_RNA"]],
+                      Sample11.WT@meta.data[["nCount_RNA"]],Sample12.WT@meta.data[["nCount_RNA"]],
+                      Sample13.Mut@meta.data[["Count_RNA"]],Sample14.Mut@meta.data[["nCount_RNA"]],
+                      Sample15.Mut@meta.data[["Count_RNA"]],Sample16.Mut@meta.data[["nCount_RNA"]])
+numeric_vector2 <- as.numeric(nCount_numbers)
+average_of_nCount_RNA <- round(mean(numeric_vector2))
+```
+
+# 13 clusters
+```{r echo=FALSE, fig.height=7, fig.width=8, message=FALSE, warning=FALSE, results='asis'}
+Idents(ALL.merge.anno) <- ALL.merge.anno$orig.ident
+WT <- subset(x = ALL.merge.anno, idents = sample.name[9:12], invert=F)
+Mut <- subset(x = ALL.merge.anno, idents = sample.name[13:16], invert=F)
+Mut13 <- subset(x = ALL.merge.anno, idents = sample.name[13], invert=F)
+Mut14 <- subset(x = ALL.merge.anno, idents = sample.name[14], invert=F)
+Mut15 <- subset(x = ALL.merge.anno, idents = sample.name[15], invert=F)
+Mut16 <- subset(x = ALL.merge.anno, idents = sample.name[16], invert=F)
+
+Idents(ALL.merge.anno) <- ALL.merge.anno$seurat_clusters
+Idents(WT) <- WT$seurat_clusters
+Idents(Mut) <- Mut$seurat_clusters
+Idents(Mut13) <- Mut13$seurat_clusters
+Idents(Mut14) <- Mut14$seurat_clusters
+Idents(Mut15) <- Mut15$seurat_clusters
+Idents(Mut16) <- Mut16$seurat_clusters
+
+DimPlot(WT, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 4,
+        cols = ALL.colors) + 
+  labs(title = "Clusters in WT merged group", subtitle = 'merge all WT + Mut eight samples')
+
+cell.number.WT <- c()
+cat("  \n")
+for (i in levels(Idents(WT))){
+cat(paste0('The cell number of cluster', i, ' in WT group is ', sum(Idents(WT) == i)), "\n")
+cat("  \n")
+cell.number.WT <- c(cell.number.WT, sum(Idents(WT) == i))}
+
+cat("\n\n\\pagebreak\n")
+DimPlot(Mut, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 4,
+        cols = ALL.colors) + 
+  labs(title = "Clusters in Mut merged group", subtitle = 'merge all WT + Mut eight samples')
+
+cell.number.Mut <- c()
+cat("  \n")
+for (i in levels(Idents(Mut))){
+cat(paste0('The cell number of cluster', i, ' in Mut group is ', sum(Idents(Mut) == i)), "\n")
+cat("  \n")
+cell.number.Mut <- c(cell.number.Mut, sum(Idents(Mut) == i))}
+
+cat("\n\n\\pagebreak\n")
+
+DimPlot(Mut13, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 4,
+        cols = ALL.colors) + 
+  labs(title = "Clusters in Mut13", subtitle = 'merge all WT + Mut eight samples')
+
+cell.number.Mut13 <- c()
+cat("  \n")
+for (i in levels(Idents(Mut13))){
+cat(paste0('The cell number of cluster', i, ' in Mut13 is ', sum(Idents(Mut13) == i)), "\n")
+cat("  \n")
+cell.number.Mut13 <- c(cell.number.Mut13, sum(Idents(Mut13) == i))}
+
+cat("\n\n\\pagebreak\n")
+DimPlot(Mut14, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 4,
+        cols = ALL.colors) + 
+  labs(title = "Clusters in Mut14", subtitle = 'merge all WT + Mut eight samples')
+
+cell.number.Mut14 <- c()
+cat("  \n")
+for (i in levels(Idents(Mut14))){
+cat(paste0('The cell number of cluster', i, ' in Mut14 is ', sum(Idents(Mut14) == i)), "\n")
+cat("  \n")
+cell.number.Mut14 <- c(cell.number.Mut14, sum(Idents(Mut14) == i))}
+
+cat("\n\n\\pagebreak\n")
+DimPlot(Mut15, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 4,
+        cols = ALL.colors) + 
+  labs(title = "Clusters in Mut15", subtitle = 'merge all WT + Mut eight samples')
+
+cell.number.Mut15 <- c()
+cat("  \n")
+for (i in levels(Idents(Mut15))){
+cat(paste0('The cell number of cluster', i, ' in Mut15 is ', sum(Idents(Mut15) == i)), "\n")
+cat("  \n")
+cell.number.Mut15 <- c(cell.number.Mut15, sum(Idents(Mut15) == i))}
+
+cat("\n\n\\pagebreak\n")
+DimPlot(Mut16, reduction = "umap", label = T,label.color = "black",repel = T,label.size = 4,
+        cols = ALL.colors) + 
+  labs(title = "Clusters in Mut16", subtitle = 'merge all WT + Mut eight samples')
+
+cell.number.Mut16 <- c()
+cat("  \n")
+for (i in levels(Idents(Mut16))){
+cat(paste0('The cell number of cluster', i, ' in Mut16 is ', sum(Idents(Mut16) == i)), "\n")
+cat("  \n")
+cell.number.Mut16 <- c(cell.number.Mut16, sum(Idents(Mut16) == i))}
+
+cat("\n\n\\pagebreak\n")
+
+names(cell.number.WT) <- paste0(levels(Idents(WT)))
+names(cell.number.Mut) <- paste0(levels(Idents(Mut)))
+names(cell.number.Mut13) <- paste0(levels(Idents(Mut13)))
+names(cell.number.Mut14) <- paste0(levels(Idents(Mut14)))
+names(cell.number.Mut15) <- paste0(levels(Idents(Mut15)))
+names(cell.number.Mut16) <- paste0(levels(Idents(Mut16)))
+```
+
+
+\pagebreak
+# Show the top10 marker genes of each cell cluster in all 8 samples merged together
+```{r message=FALSE, warning=FALSE, include=FALSE}
+ALL.merge.anno.anno <- ALL.merge.anno
+
+Idents(ALL.merge.anno.anno) <- ALL.merge.anno.anno$orig.ident
+WT.anno <- subset(x = ALL.merge.anno.anno, idents = sample.name[9:12], invert=F)
+Mut.anno <- subset(x = ALL.merge.anno.anno, idents = sample.name[13:16], invert=F)
+Idents(ALL.merge.anno.anno) <- ALL.merge.anno.anno$seurat_clusters
+Idents(WT.anno) <- WT.anno$seurat_clusters
+Idents(Mut.anno) <- Mut.anno$seurat_clusters
+
+# Show the top10 marker genes of each cell cluster.
+## I can generate all the marker genes of each cluster if we need.
+ALL.merge.anno.anno.markers <- FindAllMarkers(ALL.merge.anno.anno, only.pos = T)
+Top10 <- ALL.merge.anno.anno.markers %>% group_by(cluster) %>% top_n(n=10, wt=avg_log2FC)
+
+WT.anno.markers <- FindAllMarkers(WT.anno, only.pos = T)
+Mut.anno.markers <- FindAllMarkers(Mut.anno, only.pos = T)
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+kable(Top10) # list the top 10 marker genes in each cluster.
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Show the top100 marker genes of each cell cluster.
+Top200 <- ALL.merge.anno.anno.markers %>% group_by(cluster) %>% top_n(n=200, wt=avg_log2FC)
+# kable(Top100) # list the top 100 marker genes in each cluster.
+write_xlsx(Top200,".\\Top200_WT-Ka.Y_markers.22.03.2024.xlsx")
+write_xlsx(Top10,".\\Top10_WT-Ka.Y_markers.22.03.2024.xlsx")
+```
+
+\pagebreak
+## Expression level of marker genes in WT + Mut merge.
+```{r echo=FALSE, fig.height=9, fig.width=7, message=FALSE, warning=FALSE}
+DoHeatmap(ALL.merge.anno.anno, features = Top10$gene, group.colors =
+            ALL.colors, size = 4.5) + 
+  scale_fill_gradientn(colors = heatmap.five.colors)
+```
+
+\pagebreak
+## Violin plot: show example marker genes in each cluster.
+```{r echo=FALSE, fig.height=2, fig.width=3, message=FALSE, warning=FALSE}
+for (i in 1:8) {
+Vln <- VlnPlot(ALL.merge.anno.anno, features = Top10$gene[i],pt.size=0, cols = ALL.colors)+
+     theme(axis.text.x = element_text(size = 8), axis.title.y = element_text(size = 10), 
+           axis.title.x = element_text(size = 0)) + theme(legend.position = "none")
+print(Vln)}
+```
+
+```{r echo=TRUE}
+sessionInfo()
+```
+
