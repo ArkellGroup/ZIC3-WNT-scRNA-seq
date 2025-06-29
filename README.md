@@ -7,10 +7,33 @@ This repository contains code for reproducibility of the single-cell RNA sequenc
 Please cite this paper if you use this data or code. 
 
 ## Requirements
-- R version 4.2.2, 
-- "Matrix" package version "1.5-1", 
-- "SeuratObject" package version "4.1.3", 
-- "Seurat" package version "4.3.0"
+- R version 4.2.2
+- The following R packages were used in this analysis:
+
+  - DESeq2 v1.42.1  
+  - SummarizedExperiment v1.32.0  
+  - Biobase v2.62.0  
+  - MatrixGenerics v1.14.0  
+  - matrixStats v1.5.0  
+  - GenomicRanges v1.54.1  
+  - GenomeInfoDb v1.38.8  
+  - IRanges v2.36.0  
+  - S4Vectors v0.40.2  
+  - BiocGenerics v0.48.1  
+  - BiocManager v1.30.25  
+  - dittoSeq v1.14.3  
+  - plyr v1.8.9  
+  - stringr v1.5.1  
+  - reshape2 v1.4.4  
+  - htmlwidgets v1.6.4  
+  - plotly v4.10.4  
+  - ggplot2 v3.5.1  
+  - dplyr v1.1.4  
+  - readr v2.1.5  
+  - tidyr v1.3.1  
+  - Seurat v4.3.0-5.2.1  
+  - SeuratObject v4.1.3-5.0.2  
+  - sp v2.2-0
   
 ## Data Availability
 Raw counts matrices are available on GEO with accession code XXXX
