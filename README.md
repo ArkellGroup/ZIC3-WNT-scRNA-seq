@@ -34,6 +34,13 @@ Please cite this paper if you use this data or code.
   - Seurat v4.3.0-5.2.1  
   - SeuratObject v4.1.3-5.0.2  
   - sp v2.2-0
+  - clusterProfiler v4.10.1
+  - enrichplot v1.22.0
+  - DOSE v3.28.2
+  - AnnotationDbi v1.64.1
+  - Org.Mm.eg.db v3.18.0
+  - ComplexUpset v1.3.3
+
   
 ## Data Availability
 Raw counts matrices are available on GEO with accession code XXXX
