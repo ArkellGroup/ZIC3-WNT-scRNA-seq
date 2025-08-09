@@ -1,0 +1,634 @@
+---
+title: "Zic3Ka/Y scRNA-seq analysis: Gene ontology"
+author: "Kristen"
+#output: html_notebook
+
+---
+
+# 1. Start
+
+**NOTE: This markdown follows on from 2_2_DEG analysis.rmd. You will need to load the RDS Seurat object and run the first steps up to completing UMAP generation (2_1_UMAPs.rmd) and the 2_2_DEG analysis.rmd before you can do any analysis using this markdown**
+
+## Figures and Data used in paper
+
+*Supp Figure 6C:* Upset plot of significant gene ontology terms associated with the DEGs in each cell cluster
+*Extended Data:* List of GO terms associated with each cluster
+
+## Nomenclature
+Throughout these markdowns, 'WT' refers to all 4 *Zic3^+/+* embryos together and Mut refers to all four *Zic3^Ka/Y* embryos together.
+
+Merged data refers to all 8 embryos (WT and Mut) together. 
+
+When individual embryos are analysed they will be referred to by their sample name: 
+- WT (*Zic3^+/+*) embryos are Sample 9, 10, 11 and 12. 
+- Mut (*Zic3^Ka/Y*) embryos are Sample 13, 14, 15 and 16. 
+
+
+## Installation and loading
+
+    clusterProfiler: A package for performing gene ontology and pathway analysis.
+    enrichplot: A package for visualizing gene ontology and pathway analysis results.
+    org.Mmu.eg.db: A package that provides annotation data for the Mus musculus genome, which is used in the code to retrieve gene IDs and symbols.
+    DOSE: A package for performing gene ontology and pathway analysis.
+
+
+```{r}
+# GO analysis
+if(!require(purrr))install.packages("purrr")
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+if (!require("clusterProfiler")) {
+  BiocManager::install("clusterProfiler")}
+if (!require("org.Mm.eg.db")) {
+  BiocManager::install("org.Mm.eg.db")}
+
+
+library(purrr)
+library(clusterProfiler)
+library(enrichplot)
+library(DOSE)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+
+# Plots
+if(!require(ggplot2))install.packages("ggplot2") #for plotting UMAP
+if(!require(ComplexUpset))install.packages("ComplexUpset")
+
+library(ggplot2)
+library(ComplexUpset)
+
+# General
+library(tidyr)
+library(readr)
+library(plyr)
+library(dplyr) 
+
+
+#for saving GOterms as one csv instead of multiple
+if(!require(openxlsx))install.packages("openxlsx")
+library(openxlsx)
+
+```
+
+# Load data
+
+If not already loaded, reload the final_markers_output_filtered dataframe from 2_2_DEG analysis.rmd. If you have opened it in excel previously, make sure you are loading the safe version of the document where gene names have not been converted to the date automatically by excel. 
+
+```{r}
+final_markers_output_filtered <- read.csv("Outputs/DESeq2_DEGs_per_cluster_filtered.csv")
+```
+
+
+# GO analysis
+
+## Set Up
+
+```{r}
+# Create an empty list to store the gene names for each cluster
+gene_lists <- list()
+
+# Iterate over each unique cluster in the dataframe
+# Split the gene names into a list by cluster
+gene_lists <- split(final_markers_output_filtered$gene_names, final_markers_output_filtered$cluster)
+
+# Convert the list elements to character vectors
+gene_lists <- lapply(gene_lists, as.character)
+```
+
+
+
+```{r}
+# Create a list of data frames with 'Genes' as the column name
+go_data_frames <- list(
+  GO_Epi = setNames(as.data.frame(gene_lists$Epi), "Genes"),
+  GO_Node = setNames(as.data.frame(gene_lists$Node), "Genes"),
+  GO_APS = setNames(as.data.frame(gene_lists$APS), "Genes"),
+  GO_PS = setNames(as.data.frame(gene_lists$PS), "Genes"),
+  GO_DE = setNames(as.data.frame(gene_lists$DE), "Genes"),
+  GO_EmVE = setNames(as.data.frame(gene_lists$EmVE), "Genes"),
+  GO_ExVE = setNames(as.data.frame(gene_lists$ExVE), "Genes"),
+  GO_ExEcto = setNames(as.data.frame(gene_lists$`ExEcto`), "Genes"),
+  GO_ExMes = setNames(as.data.frame(gene_lists$`ExMes`), "Genes"),
+  GO_PGCs = setNames(as.data.frame(gene_lists$PGCs), "Genes"),
+  GO_NasMes = setNames(as.data.frame(gene_lists$NasMes), "Genes"),
+  GO_AmnionChorion = setNames(as.data.frame(gene_lists$`Amnion/Chorion`), "Genes"),
+  GO_BP = setNames(as.data.frame(gene_lists$`Blood prog`), "Genes")
+)
+
+```
+
+## Call ENTREZ IDs
+
+```{r}
+# Create an empty list to store the results
+entrez_id_lists <- list()
+
+# Iterate through each data frame in the go_data_frames list
+for (list_name in names(go_data_frames)) {
+  
+  # Get the current data frame
+  current_df <- go_data_frames[[list_name]]
+  
+  # Apply the operation for getting ENTREZ IDs
+  entrez_ids <- current_df %>%
+    dplyr::mutate(ENTREZID = AnnotationDbi::select(org.Mm.eg.db,
+                             keys = Genes,
+                             columns = "ENTREZID",
+                             keytype = "SYMBOL")$ENTREZID) %>%
+    dplyr::filter(!is.na(ENTREZID))  # Remove rows with NA values in the ENTREZID column
+  
+  # Store the result in the entrez_id_lists
+  entrez_id_lists[[list_name]] <- entrez_ids
+}
+
+```
+```{r}
+#check it worked
+entrez_id_lists$GO_Node
+entrez_id_lists$GO_APS
+entrez_id_lists$GO_AmnionChorion
+```
+
+## Enrichment analysis
+This code is performing gene ontology (GO) enrichment analysis on the sets of differentially expressed genes (DEGs) identified for three different clusters.
+
+The code first selects three clusters of genes from the final_markers_output_filtered listof DEGs (specified by index positions 1, 2, and 8) using the map() function. It then applies the enrichGO() function from the clusterProfiler package to each cluster of genes to determine which GO biological process terms are enriched in the gene set.
+
+enrichGO() takes several arguments including the gene argument which contains the list of genes to be analyzed for GO term enrichment, OrgDb argument which specifies the organism database to be used, ont argument which specifies the ontology to be used (here, "BP" for biological process), pvalueCutoff argument which specifies the p-value cutoff for significance, pAdjustMethod argument which specifies the multiple testing correction method to be used (here, "BH" for Benjamini-Hochberg), and readable argument which returns GO terms in readable format if set to TRUE.
+
+The enrichGO() function returns a list object containing enriched GO terms and their corresponding statistics for each input gene set. The map() function applies the enrichGO() function to each of the three gene sets in the DEGs_All_ls.ID list, and returns a list of enriched GO terms for each gene set.
+
+
+There are three types of GO terms: biological process ("BP"), molecular function ("MF"), and cellular component ("CC").
+
+### Biological Processes
+
+First, run this function:
+
+
+```{r}
+barplotTerm_BP <- function(eGO, x = "Count", color = "p.adjust", showCategory = 50, font.size = 10, title = "GO Terms: Biological Processes") {
+
+  # Sort the results by the p-value
+  res <- eGO@result[order(eGO@result[[color]]), ]
+
+  # Only show the top n categories
+  if (nrow(res) > showCategory) {
+    res <- res[1:showCategory, ]
+  }
+
+  # Create the barplot
+  ggplot(res, aes(x = reorder(.data$Description, -.data[[color]]), 
+                  y = .data[[x]], 
+                  fill = .data[[color]])) +
+    geom_bar(stat = "identity") +
+    labs(x = NULL, y = x, fill = "Adjusted p-value") +
+    scale_fill_gradient(low = "grey90", high = "red", na.value = "white") +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = font.size),
+      axis.text.y = element_text(size = font.size),
+      axis.title = element_text(size = font.size),
+      legend.position = "bottom",
+      legend.key.height = unit(0.5, 'cm'),
+      legend.key.width = unit(1.1, 'cm'),
+      legend.text = element_text(size = font.size - 1),
+      plot.title = element_text(size = font.size + 2, face = "bold"),
+      panel.spacing.x = unit(4, "cm")
+    ) +
+    ggtitle(title) +
+    coord_flip()
+}
+
+```
+
+
+The color scale indicates the adjusted p-value for each category, with lower p-values represented by red colors and higher p-values represented by white or light gray colors. Therefore, categories with darker red colors have lower adjusted p-values and are more statistically significant than categories with lighter colors.
+
+The count represents the number of genes in your input list that are annotated to each Gene Ontology (GO) category shown on the plot.
+
+In the csv that is saved there will be a p value, adjusted p value and q value. The adjusted p value is generally used to determine significance. The q value represents the expected proportion of false positives among all the tests called significant. A lower q-value indicates a more significant association, with a lower expected false positive rate. Both are normally set to p<0.05 and q<0.05.
+
+
+```{r, fig.height = 8}
+# Define a vector of cluster names
+cluster_names <- c("GO_Epi", "GO_Node", "GO_APS", "GO_DE", "GO_PS", "GO_EmVE", "GO_ExVE", "GO_ExEcto", "GO_ExMes", "GO_PGCs", "GO_NasMes", "GO_AmnionChorion", "GO_BP")
+
+# Create an empty list to store gene-GO associations
+gene_cluster_list <- list()
+```
+
+
+Can take ~5 mins to run
+
+#### Get GO terms
+```{r}
+eGO_list <- list()
+for (cluster_name in cluster_names) {
+  eGO_BP <- enrichGO(
+    gene          = entrez_id_lists[[cluster_name]]$ENTREZID,
+    OrgDb         = org.Mm.eg.db,
+    ont           = "BP", #biological process
+    pAdjustMethod = "BH",
+    pvalueCutoff  = 0.05,
+    readable      = TRUE
+  )
+  
+  # Store the eGO terms in the list
+  eGO_list[[cluster_name]] <- eGO_BP
+  
+  # Call the barplotTerm_BP function with the eGO_BP object
+  plot <- barplotTerm_BP(eGO_BP, title = paste("GO Terms: Biological Process, ", cluster_name))
+  
+  # Get the gene-GO associations
+  gene_go <- as.data.frame(eGO_BP@result, stringsAsFactors = FALSE)
+  
+  # Store the gene-GO associations in the list
+  gene_cluster_list[[cluster_name]] <- gene_go
+  
+  # Print the plot
+  print(plot)
+  
+  # Save gene-GO associations as a CSV file
+  filename <- paste(cluster_name, "_GO_BP.csv", sep = "")
+  write.csv(gene_go, filename, row.names = FALSE)
+}
+```
+
+#### Simplied GO terms
+
+There is a lot of overlap with the GO terms that are produced, and many genes are given multiple similar terms. This code groups similar GO terms into one more simplified term, allowing for easier interpretation of the data when there are too many terms. 
+
+Takes about ~15 mins to run. 
+
+```{r}
+# Simplify eGO terms
+# Selects one representative term from redundant terms which have similarity higher than ‘cutoff'. Lower cutoff = fewer terms
+
+simplified_GO_list <- list()
+for (cluster_name in cluster_names) {
+  message("Simplifying ", cluster_name, "...")
+  eGO_BP <- eGO_list[[cluster_name]]
+  
+  # Perform simplification for the current cluster
+  simplified_GO <- simplify(eGO_BP, cutoff = 0.3, by = "p.adjust")
+  simplified_GO_list[[cluster_name]] <- as.data.frame(simplified_GO)
+  
+  # Save simplified GO data as a CSV file
+  simplified_filename <- paste(cluster_name, "_simplified_GO.csv", sep = "")
+  write.csv(as.data.frame(simplified_GO_list[[cluster_name]]), simplified_filename, row.names = FALSE)
+  message("Complete ", cluster_name, "...")
+}
+
+```
+
+
+
+
+```{r}
+#check that each Goterm list is unique for that cluster
+
+# original GO terms
+gene_cluster_list$GO_PS
+gene_cluster_list$GO_Node
+
+# simplified list
+simplified_GO_list$GO_Epi
+simplified_GO_list$GO_Node
+simplified_GO_list$GO_DE
+simplified_GO_list$GO_EmVE
+```
+
+
+Save all of the csv files as one Excel doc:
+```{r}
+# Create an Excel workbook
+excel_file <- createWorkbook()
+
+# Iterate over each cluster
+for (cluster_name in cluster_names) {
+
+  # Add the data frames to the Excel workbook as separate sheets
+  addWorksheet(wb = excel_file, sheetName = paste(cluster_name, "_GO_BP", sep = ""))
+  writeData(wb = excel_file, sheet = paste(cluster_name, "_GO_BP", sep = ""), x = gene_go)
+
+  addWorksheet(wb = excel_file, sheetName = paste(cluster_name, "_simplified_GO", sep = ""))
+  writeData(wb = excel_file, sheet = paste(cluster_name, "_simplified_GO", sep = ""), x = as.data.frame(simplified_GO_list[[cluster_name]]))
+}
+
+# Save the Excel workbook
+saveWorkbook(excel_file, "Outputs/GOterms_combined_BP_all.xlsx", overwrite = TRUE)
+
+```
+
+```{r}
+# Create an Excel workbook
+excel_file <- createWorkbook()
+
+# Iterate over each cluster
+for (cluster_name in cluster_names) {
+
+  addWorksheet(wb = excel_file, sheetName = paste(cluster_name, "_simplified_GO", sep = ""))
+  writeData(wb = excel_file, sheet = paste(cluster_name, "_simplified_GO", sep = ""), x = as.data.frame(simplified_GO_list[[cluster_name]]))
+}
+
+# Save the Excel workbook
+saveWorkbook(excel_file, "Outputs/GOterms_combined_BP_reduced.xlsx", overwrite = TRUE)
+
+```
+
+
+```{r}
+# Combine all simplified GO data frames into one, tagging each with the cluster name
+Simple_GO_BP <- do.call(rbind, lapply(names(simplified_GO_list), function(cluster_name) {
+  df <- simplified_GO_list[[cluster_name]]
+  df$Cluster <- cluster_name
+  return(df)
+}))
+
+
+```
+
+
+### Molecular Function
+First, run this function:
+```{r GOfunction}
+
+barplotTerm_MF <- function(eGO, x = "Count", color = "p.adjust", showCategory = 50, font.size = 10, title = "GO Terms: Molecular Function") {
+  
+  # Sort the results by the p-value
+  res <- eGO[order(eGO@result[[color]]), ]
+  
+  # Only show the top n categories
+  if (nrow(res) > showCategory) {
+    res <- res[1:showCategory, ]
+  }
+  
+  # Create the barplot
+  ggplot(res, aes(x = reorder(Description, -.data[[color]]), 
+                  y = .data[[x]], 
+                  fill = .data[[color]])) +
+    geom_bar(stat = "identity") +
+    labs(x = NULL, y = x, fill = "Adjusted p-value") +
+    scale_fill_gradient(low = "grey90", high = "red", na.value = "white") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = font.size),
+          axis.text.y = element_text(size = font.size),
+          axis.title = element_text(size = font.size),
+          legend.position = "bottom",
+          legend.key.height= unit(0.5, 'cm'),
+          legend.key.width= unit(1.1, 'cm'),
+          legend.text = element_text(size = font.size - 1),
+          plot.title = element_text(size = font.size + 2, face = "bold"),
+          panel.spacing.x = unit(4, "cm")) +
+    ggtitle(title) +
+    coord_flip()
+}
+
+```
+
+#### Get GO terms
+```{r}
+eGO_list <- list()
+for (cluster_name in cluster_names) {
+  eGO_MF <- enrichGO(
+    gene          = entrez_id_lists[[cluster_name]]$ENTREZID,
+    OrgDb         = org.Mm.eg.db,
+    ont           = "MF", #molecular function
+    pAdjustMethod = "BH",
+    pvalueCutoff  = 0.05,
+    readable      = TRUE
+  )
+  
+  # Store the eGO terms in the list
+  eGO_list[[cluster_name]] <- eGO_MF
+  
+  # Call the barplotTerm_BP function with the eGO_BP object
+  plot <- barplotTerm_MF(eGO_MF, title = paste("GO Terms: Molecular Function, ", cluster_name))
+  
+  # Get the gene-GO associations
+  gene_go <- as.data.frame(eGO_MF@result, stringsAsFactors = FALSE)
+  
+  # Store the gene-GO associations in the list
+  gene_cluster_list[[cluster_name]] <- gene_go
+  
+  # Print the plot
+  print(plot)
+  
+  # Save gene-GO associations as a CSV file
+  filename <- paste(cluster_name, "_GO_MF.csv", sep = "")
+  write.csv(gene_go, filename, row.names = FALSE)
+}
+```
+
+#### Simplified GO terms
+```{r}
+# Simplify eGO terms
+# selects one representative term from redundant terms which have similarity higher than ‘cutoff'. Lower cutoff = fewer terms
+simplified_GO_list <- list()
+for (cluster_name in cluster_names) {
+  message("Simplifying ", cluster_name, "...")
+  eGO_MF <- eGO_list[[cluster_name]]
+  
+  # Perform simplification for the current cluster
+  simplified_GO <- simplify(eGO_MF, cutoff = 0.3, by = "p.adjust")
+  simplified_GO_list[[cluster_name]] <- as.data.frame(simplified_GO)
+  
+  # Save simplified GO data as a CSV file
+  simplified_filename <- paste(cluster_name, "_simplifiedGOMF.csv", sep = "")
+  write.csv(as.data.frame(simplified_GO_list[[cluster_name]]), simplified_filename, row.names = FALSE)
+  message("Complete ", cluster_name, "...")
+}
+
+```
+
+
+```{r}
+#check that each Goterm list is unique for that cluster
+# original terms
+gene_cluster_list$GO_PS
+gene_cluster_list$GO_Node
+
+# simplified
+simplified_GO_list$GO_Epi
+simplified_GO_list$GO_Node
+simplified_GO_list$GO_DE
+simplified_GO_list$GO_EmVE
+simplified_GO_list$GO_APS
+```
+
+
+Save all of the csv files as one Excel doc:
+```{r}
+# Create an Excel workbook
+excel_file <- createWorkbook()
+
+# Iterate over each cluster
+for (cluster_name in cluster_names) {
+  
+  # Add the data frames to the Excel workbook as separate sheets
+  addWorksheet(wb = excel_file, sheetName = paste(cluster_name, "_GO_MF", sep = ""))
+  writeData(wb = excel_file, sheet = paste(cluster_name, "_GO_MF", sep = ""), x = gene_go)
+
+  addWorksheet(wb = excel_file, sheetName = paste(cluster_name, "_simplifiedGOMF", sep = ""))
+  writeData(wb = excel_file, sheet = paste(cluster_name, "_simplifiedGOMF", sep = ""), x = as.data.frame(simplified_GO_list[[cluster_name]]))
+}
+
+# Save the Excel workbook
+saveWorkbook(excel_file, "Outputs/GOterms_combined_MF_all.xlsx", overwrite = TRUE)
+
+```
+
+```{r}
+# save simplified only
+
+# Create an Excel workbook
+excel_file <- createWorkbook()
+
+# Iterate over each cluster
+for (cluster_name in cluster_names) {
+  addWorksheet(wb = excel_file, sheetName = paste(cluster_name, "_simplifiedGOMF", sep = ""))
+  writeData(wb = excel_file, sheet = paste(cluster_name, "_simplifiedGOMF", sep = ""), x = as.data.frame(simplified_GO_list[[cluster_name]]))
+}
+
+# Save the Excel workbook
+saveWorkbook(excel_file, "Outputs/GOterms_combined_MF_reduced.csv", overwrite = TRUE)
+
+```
+
+```{r}
+# Combine all simplified GO data frames into one, tagging each with the cluster name
+Simple_GO_MF <- do.call(rbind, lapply(names(simplified_GO_list), function(cluster_name) {
+  df <- simplified_GO_list[[cluster_name]]
+  df$Cluster <- cluster_name
+  return(df)
+}))
+
+```
+
+# Upset plots
+
+Read list of simple GOterms for molecular function and biological function. The simplified Go terms were combined into one csv sheet externally in excel before they could be loaded. 
+
+```{r}
+# Define the clusters to be plotted
+selected_clusters <- c("GO_Epi","GO_PS", "GO_APS", "GO_Node","GO_DE", "GO_EmVE", "GO_ExVE")
+
+# Filter the simplified dataframes to only those clusters
+Simple_GO_MF_filtered <- subset(Simple_GO_MF, Cluster %in% selected_clusters)
+Simple_GO_BP_filtered <- subset(Simple_GO_BP, Cluster %in% selected_clusters)
+```
+
+
+```{r}
+#Molecular function
+# Create an empty list to store the Goterm names for each cluster
+GO_lists_MF <- list()
+
+# Iterate over each unique cluster in the dataframe
+# Split the GOterm names into a list by cluster
+GO_lists_MF <- split(Simple_GO_MF_filtered$Cluster, Simple_GO_MF_filtered$Description)
+
+# Convert the list elements to character vectors
+GO_lists_MF <- lapply(GO_lists_MF, as.character)
+
+#Biological process
+# Create an empty list to store the Goterm names for each cluster
+GO_lists_BP <- list()
+
+# Iterate over each unique cluster in the dataframe
+# Split the GOterm names into a list by cluster
+GO_lists_BP <- split(Simple_GO_BP_filtered$Cluster, Simple_GO_BP_filtered$Description)
+
+# Convert the list elements to character vectors
+GO_lists_BP <- lapply(GO_lists_BP, as.character)
+
+```
+
+
+```{r}
+from_list <- function(list_data) {
+  members <- unique(unlist(list_data))
+  data.frame(
+    lapply(list_data, function(set) members %in% set),
+    row.names = members,
+    check.names = FALSE
+  )
+}
+```
+
+```{r, fig.width=15}
+# Assuming GO_lists is your list of GO terms as before
+
+# Create a matrix using the from_list function
+matrix_data_MF <- from_list(GO_lists_MF)
+matrix_data_MF$GO_term_MF <- rownames(matrix_data_MF)
+
+matrix_data_BP <- from_list(GO_lists_BP)
+matrix_data_BP$GO_term_BP <- rownames(matrix_data_BP)
+
+```
+
+
+
+
+```{r, fig.width=6, fig.height=8}
+
+# Plot using ComplexUpset
+Simple_MF_upset <-  upset(
+                    matrix_data_MF,
+                    intersect = names(GO_lists_MF),  # Assuming your clusters are named the same as in GO_lists
+                    n_intersections=13, #to limit to only a certain number 
+                    sort_intersections="descending",
+                    sort_intersections_by="degree",
+                    set_sizes=FALSE, #hide the set size
+                    base_annotations = list(),
+                    width_ratio = 0.4,
+                    height_ratio = 0.8
+                  )
+
+print(Simple_MF_upset)
+```
+
+
+
+```{r, fig.width=5, fig.height=8}
+# Plot using ComplexUpset
+Simple_BP_upset <-  upset(
+                    matrix_data_BP,
+                    intersect = names(GO_lists_BP),  # Assuming your clusters are named the same as in GO_lists
+                    n_intersections=20, #to limit to only a certain number
+                    sort_intersections="descending",
+                    sort_intersections_by="degree",
+                    set_sizes=FALSE, #hide the set size
+                    base_annotations = list(),
+                    width_ratio = 0.4,
+                    height_ratio = 0.8)
+
+
+print(Simple_BP_upset)
+```
+
+
+
+```{r}
+ggsave("Outputs/UpSet_MF.png", plot = Simple_MF_upset, dpi=300, width = 5.5, height = 6, units = "in")
+ggsave("Outputs/UpSet_BP.png", plot = Simple_BP_upset, dpi=300, width = 4.5, height = 6, units = "in")
+```
+
+```{r}
+write.csv(matrix_data_BP, "GO_matrix_BP.csv")
+write.csv(matrix_data_MF, "GO_matrix_MF.csv")
+```
+
+## Session Report
+```{r}
+sessionInfo()
+```
+
+
+# Cleanup
+```{r}
+rm(gene_go, gene_cluster_list, gene_lists, plot, current_df, eGO_BP, entrez_ids, entrez_id_lists, final_markers_output_filtered, barplotTerm_BP, barplotTerm_MF, cluster_name, cluster_names, eGO_list, eGO_MF, excel_file, filename, go_data_frames, list_name, simplified_filename, simplified_GO, simplified_GO_list)
+```
+
