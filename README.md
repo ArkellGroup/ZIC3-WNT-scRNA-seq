@@ -11,39 +11,38 @@ Please cite this paper if you use this data or code.
 - R studio (v2022.02.0 – v2024.04.2+764)
 - Cell Ranger (v7.1.0)
 - The following R packages were used in this analysis:
-
-o	Matrix, v1.5-1
-o	SeuratObject, (v4.1.3-5.0.2)
-o	Seurat (v4.3.0-5.2.1)
-o	DESeq2 v1.42.1
-o	SummarizedExperiment v1.32.0
-o	Biobase v2.62.0
-o	MatrixGenerics v1.14.0
-o	matrixStats v1.5.0
-o	GenomicRanges v1.54.1
-o	GenomeInfoDb v1.38.8
-o	IRanges v2.36.0
-o	S4Vectors v0.40.2
-o	BiocGenerics v0.48.1
-o	BiocManager v1.30.25
-o	dittoSeq v1.14.3
-o	plyr v1.8.9
-o	stringr v1.5.1
-o	reshape2 v1.4.4
-o	htmlwidgets v1.6.4
-o	plotly v4.10.4
-o	ggplot2 v3.5.1
-o	dplyr v1.1.4
-o	readr v2.1.5
-o	tidyr v1.3.1
-o	sp v2.2-0
-o	clusterProfiler v4.10.1
-o	enrichplot v1.22.0
-o	DOSE v3.28.2
-o	AnnotationDbi v1.64.1
-o	Org.Mm.eg.db v3.18.0
-o	ComplexUpset v1.3.3
-o	openxlsx_4.2.8
+  - Matrix, v1.5-1
+  - SeuratObject, (v4.1.3-5.0.2)
+  - Seurat (v4.3.0-5.2.1)
+  - DESeq2 v1.42.1
+  - SummarizedExperiment v1.32.0
+  - Biobase v2.62.0
+  - MatrixGenerics v1.14.0
+  - matrixStats v1.5.0
+  - GenomicRanges v1.54.1
+  - GenomeInfoDb v1.38.8
+  - IRanges v2.36.0
+  - S4Vectors v0.40.2
+  - BiocGenerics v0.48.1
+  - BiocManager v1.30.25
+  - dittoSeq v1.14.3
+  - plyr v1.8.9
+  - stringr v1.5.1
+  - reshape2 v1.4.4
+  - htmlwidgets v1.6.4
+  - plotly v4.10.4
+  - ggplot2 v3.5.1
+  - dplyr v1.1.4
+  - readr v2.1.5
+  - tidyr v1.3.1
+  - sp v2.2-0
+  - clusterProfiler v4.10.1
+  - enrichplot v1.22.0
+  - DOSE v3.28.2
+  - AnnotationDbi v1.64.1
+  - Org.Mm.eg.db v3.18.0
+  - ComplexUpset v1.3.3
+  - openxlsx_4.2.8
 
 
 ## Data Availability
